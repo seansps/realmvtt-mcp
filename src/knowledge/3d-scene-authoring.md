@@ -313,7 +313,38 @@ have no GLB — the mesh is generated at render time.
 
 ---
 
-## 9. Checklist before placing
+## 9. Creatures are not scenery
+
+Everything above is **scenery** — `scene-objects-3d` rows placed with
+`realm_place_objects`. Creatures are different: a goblin on the map is a **token**,
+an instance of an NPC record, created with `realm_place_tokens`. Six goblins are six
+token documents all pointing at one NPC record.
+
+```jsonc
+// realm_place_tokens
+{
+  "sceneId": "…",
+  "record": "Goblin",              // by name or id
+  "at": [ { "x": 19, "y": 12 }, { "x": 21, "y": 13 } ],
+  "faction": "enemy"
+}
+```
+
+Tokens use the **same grid coordinates** as the scenery, so a creature at `x:19,
+y:12` stands on the floor tile at `19,12`.
+
+- `z` is elevation in cubes. Leave it 0 for the ground floor, or set it to a
+  storey's walking surface (2.9 in the stacked convention) to place a creature
+  upstairs. A grounded token settles onto whatever surface is under it.
+- `flying: true` is only for a creature genuinely airborne — never use it just
+  because `z` is raised.
+- Whether a token draws as a flat image or a 3D model comes from its RECORD
+  (`token.model3D`), not from the token. `realm_set_3d_token` gives a monster a
+  mini; without one it renders from its flat token image.
+- Both fields are ignored on 2D scenes, which is what `realm_place_tokens` will
+  tell you if you send them.
+
+## 10. Checklist before placing
 
 - [ ] Every `assetId` exists — verify with `realm_search_3d_assets` first. An
       unknown id renders as a magenta "missing asset" marker.

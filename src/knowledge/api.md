@@ -20,7 +20,8 @@ errors you'll see.
 | Scenes | `/scenes` | `realm_list_scenes` |
 | 3D scenery catalog | `/assets-3d` | `realm_search_3d_assets` |
 | 3D token (mini) catalog | `/tokens-3d` | `realm_search_3d_tokens` |
-| Placed 3D objects | `/scene-objects-3d` | `realm_place_objects` |
+| Placed 3D objects (scenery) | `/scene-objects-3d` | `realm_place_objects` |
+| Creature tokens on a scene | `/tokens` | `realm_place_tokens` |
 | Rulesets | `/rulesets`, `/owned-rulesets`, `/ruleset-list` | `realm_list_rulesets` |
 
 **Record types come from the ruleset**, not from Realm. A D&D 5e campaign has
@@ -48,6 +49,21 @@ report it as `type`.
 New scenes take their grid units from the campaign's ruleset
 (`settings.otherSettings.defaultUnitsPerSquare` / `defaultUnits`), which is why one
 system measures in feet and another in metres.
+
+### Scenery vs creatures
+
+Two different services put things on a scene, and they are not interchangeable:
+
+- **`scene-objects-3d`** — the SCENERY of a 3D scene: floors, walls, doors, props,
+  lights, roofs. Bulk-created (`multi: ['create','remove']`), so a whole build goes
+  in one request.
+- **`tokens`** — the CREATURES, on 2D and 3D scenes alike. A token is an instance of
+  a record, so six goblins are six tokens referencing one NPC. Bulk REMOVE is
+  supported but not bulk create, so placing a group is one request per token.
+
+A token's `position.z` and `flying` only mean anything on a 3D scene; on a 2D scene
+they're silently inert. How a token DRAWS (flat image vs 3D mini) comes from its
+record's `token.imageUrl` / `token.model3D`, not from the token document.
 
 ### Two separate 3D catalogs
 
