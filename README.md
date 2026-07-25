@@ -121,8 +121,9 @@ to the rule types **your ruleset** adds on top of the built-in ones.
 > Compile my ruleset directory and push it
 
 Rulesets are downloaded to a file rather than dumped into the conversation — they
-run to megabytes. If you keep yours as source files, the server drives your
-[ruleset-compiler](https://github.com/seansps/realm15-vtt) checkout.
+run to megabytes. If you keep yours as source files, the server can drive your
+local `ruleset-compiler` checkout — point it there once with `compilerPath` (or the
+`REALMVTT_RULESET_COMPILER` env var) and it's remembered.
 
 **3D scenes**
 
