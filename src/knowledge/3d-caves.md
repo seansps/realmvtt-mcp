@@ -2,100 +2,105 @@
 
 Read `3d-scene-authoring` first.
 
-Cave walls are not ordinary straight walls. They ship as a **9-piece connecting
-set** per family, designed so that any piece can abut any other. Understanding the
-port model is what lets you build a winding passage that actually joins up instead
-of a chain of near-misses.
+**Use `realm_build_cave_path`. Do not place cave walls by hand.**
 
-## The port model
+That is not a style preference. A cave wall family is a 9-piece *connecting set*,
+and the pieces only join where their ports land exactly — which takes floating-point
+geometry with a grid-snap check per candidate. Placing straight pieces on cell edges
+instead is what produces a blocky, stair-stepped cave with square corners, which is
+the single most common way a cave comes out wrong.
 
-A wall run lives on a **grid line**, with its body occupying a band of width `depth`
-on one side. The run's centerline therefore sits `depth / 2` in from that line.
+## Caves are not rooms
 
-Every piece begins and ends on one of two kinds of port:
+| | Room / dungeon walls | Cave walls |
+|---|---|---|
+| Pieces | one straight wall (+ door, window) | 9-piece connecting set |
+| Placement | one piece per cell EDGE, `rot` = the edge | chained along a route by port matching |
+| Corners | 90°, implied by the grid | rounded corner, 45° bends, diagonals |
+| Tool | `realm_place_objects` | `realm_build_cave_path` |
 
-- **AXIS port** — crosses a cell edge at `depth/2` from a grid line, perpendicular
-  to it. This is exactly where a straight wall's end cap is.
-- **DIAG port** — crosses a cell **corner** at 45°, its cross-section centred on the
-  corner. This is exactly where a diagonal's end cap is.
+A family with **no bend pieces is not a cave set** — it's an ordinary wall family,
+and `realm_build_cave_path` will refuse it and tell you to use per-edge walls. That's
+the check that stops the two techniques being mixed up.
 
-**Pieces connect when their ports match.** That single rule is the whole system.
+## The piece set
 
-## The pieces
-
-| `shape` | id suffix | seating | turns |
+| `shape` | id suffix | seating | role |
 |---|---|---|---|
-| *(none)* | — | edge-hugging | straight through |
-| `wave` | `-wave`, `-wave2` | **edge-hugging** | straight through, but bulges |
-| `corner_round` | `-round` | cell-centred | 90° |
-| `diag` | `-diag` | cell-centred | 45° run across the cell |
-| `bend` | `-bend` | cell-centred | 45° |
-| `bend_mirror` | `-bendb` | cell-centred | 45°, mirrored |
-| `bend_in` | `-bendin` | cell-centred | 45° inward |
-| `bend_in_mirror` | `-bendinb` | cell-centred | 45° inward, mirrored |
-| `diag_fill` | `-diagfill` | cell-centred | junction filler |
-| `filler` | `-filler` | cell-centred | junction filler |
+| *(none)* | — | edge-hugging | straight |
+| `wave` | `-wave`, `-wave2` | **edge-hugging** | straight, but bulging |
+| `corner_round` | `-round` | cell-centred | 90° turn |
+| `diag` | `-diag` | cell-centred | 45° run across a cell |
+| `bend` / `bend_mirror` | `-bend` / `-bendb` | cell-centred | 45° turn, either direction |
+| `bend_in` / `bend_in_mirror` | `-bendin` / `-bendinb` | cell-centred | 45° turn, inward pair |
+| `diag_fill`, `filler` | `-diagfill`, `-filler` | cell-centred | junction fillers |
 
-Two facts that are easy to get wrong:
+Two things that catch people out:
 
-**Waves are edge-hugging, not cell-centred.** They carry a `shape` value but they
-are straight-ported walls that merely bulge in between. Do not treat "has a shape"
-as "sits in the middle of its cell" — that's true of the corners and bends, and
-false of the waves.
+**Waves are edge-hugging.** They carry a `shape` but are straight-ported walls that
+merely bulge. "Has a shape" does not mean "sits centred in its cell" — that's true of
+the corners and bends, false of the waves.
 
-**There are FOUR bends, not two.** At any given port — a line, a heading, and which
-side the body sits on — exactly *one* placement of *one* bend connects. The mirror
-pair forces the turn direction, and the inward pair is what makes a zigzag possible.
-If a bend refuses to line up, you almost certainly need one of the other three
-rather than a different rotation.
+**There are FOUR bends, not two.** At a given port exactly one placement of one bend
+connects; the mirror pair forces the turn direction and the inward pair is what makes
+a zigzag possible. This is why hand-placement fails: picking the wrong one of four
+leaves a gap that looks like a modelling error.
 
-Cave assets are `role: "wall"`, `kind: "tile"`. Find a family with
-`realm_search_3d_assets` filtering `role: "wall"` and a cave-ish `category` or
-`search`; every piece of one set shares a `family`.
+## Drawing a route
 
-## Laying out a passage
+`realm_build_cave_path` takes a `route` — the cells the wall run follows — and
+chains pieces along it, exactly as the in-app Cave Draw tool does when you drag.
 
-Work forward from an **open port** — a point plus the heading the run leaves it on:
+```jsonc
+{
+  "sceneId": "…",
+  "family": "cave-rock",
+  "route": [ {"x":0,"y":0}, {"x":5,"y":0}, {"x":10,"y":5}, {"x":10,"y":11} ],
+  "z": 0.45,
+  "apply": true
+}
+```
 
-1. Start on an axis port: a straight wall's end, on a grid line.
-2. Choose the piece whose **entry** port lands on your current open port with the
-   right heading. Straight and wave pieces continue in the same direction; a
-   `corner_round` turns 90°; the bends and `diag` turn 45°.
-3. That piece's **exit** port becomes the new open port.
-4. Repeat until the run reaches where you're going.
+Three rules for a route that produces a real cave:
 
-Because the ports are exact, a closed loop comes back to its own starting port
-precisely — an octagonal chamber built from 45° pieces meets itself with no fudging.
-That's also the test: if your loop *nearly* closes, a piece is wrong, not the model.
+1. **Include diagonal moves.** Gaps are filled 8-way, so a route that only steps
+   along x and y can only ever produce axis-aligned walls — a stair-step. Going from
+   `(0,0)` to `(10,5)` in one waypoint gives you diagonals; going via `(10,0)` gives
+   you a right angle.
+2. **The route is the WALL LINE, not the passage centre.** Trace one side of the
+   passage, then trace the other side as a second call.
+3. **Waypoints, not every cell.** Corners of the winding path are enough.
 
-Note that pieces advance by different amounts. A 45° piece moves the port across a
-cell corner, a straight piece across a cell edge. **Don't assume one piece per
-cell** when following a drawn route — chase the port until it reaches the target
-cell, which may take more or fewer pieces than the cell count suggests.
+The result reports `byShape`, so you can see immediately whether you got curves. A
+run that is 100% `straight` means the route had no diagonals or turns in it.
 
-## Designing the cave itself
+## Sizing
 
-The piece set is the vocabulary; the layout is yours. Some things worth doing that
-a generator won't:
+The commonest complaint after stair-stepping is that passages feel cramped.
 
-- **Vary the width.** A passage that is one cell wide everywhere reads as a corridor
-  with a rock texture. Open into chambers, pinch into crawls.
-- **Use the 45s.** Caves shouldn't read as a grid. Diagonals and bends are what
-  make a passage look eroded rather than excavated.
-- **Chambers from loops.** Ring a space with 45° pieces for a roughly circular
-  chamber; the ports guarantee it closes.
-- **Floor and ceiling.** Lay natural rock/dirt floor tiles through the passage. Cave
-  floors can rise — stack tiers at 0.45 increments for a sloping cavern, keeping
-  each step under the 0.65 step-up limit so tokens can walk it.
-- **Light it sparsely.** Caves are dark; that's the point. A few lit props (glowing
-  fungus, a brazier at a camp) placed where you want the party to stop.
-- **Stack stories carefully.** An upper cave level follows the run below as a
-  connected chain — advance it port by port, not by copying cells, since sampled
-  cells skip.
+- **Passages: 3 cells wide minimum** (15 ft). Two cells is a squeeze corridor; one
+  cell is a crawl and should be deliberate.
+- **Chambers: 8–15 cells across.** A chamber wants to be visibly *not* a corridor —
+  room for a fight, several tokens, and props around the edges.
+- **Vary it.** A cave that is one width throughout reads as a corridor with a rock
+  texture. Pinch to 2 cells at a chokepoint, open to 12 in a cavern.
+
+Remember 1 cell = 5 ft: a 3-cell passage is 15 ft across, which is about right for a
+party moving two abreast with room to fight.
+
+## Finishing the cave
+
+- **Floor** the whole interior with natural rock/dirt tiles (`role: "floor"`), at
+  `z = 0` for the ground level.
+- **Height variation** — stack floor tiers at 0.45 increments for a sloping cavern,
+  keeping each step under the 0.65 step-up limit so tokens can walk it.
+- **Light sparingly.** Caves are dark, and that's the point. A few lit props where
+  the party will stop — a campfire, glowing fungus, a brazier at a camp.
+- **Props**: rubble, stalagmites, bones. Scatter, don't line up.
 
 ## Verifying
 
-Every cave piece is a wall, so `realm_get_scene_objects` shows them under `tile`.
-Check the assetId breakdown: a passage that is 90% straight pieces probably isn't
-winding much. And confirm each piece resolved — a missing cave asset renders as a
-magenta marker, which is far more obvious in a dark cave than you might expect.
+`realm_get_scene_objects` breaks down what's placed by asset. If the cave's wall
+count is overwhelmingly the plain straight piece, the route wasn't winding enough —
+add diagonal waypoints and rebuild. Every piece should also resolve to a real asset;
+a missing one renders as a magenta marker, which is very visible in a dark cave.

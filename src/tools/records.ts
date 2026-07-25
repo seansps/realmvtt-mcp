@@ -9,7 +9,7 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { Json } from "../api/client.js";
+import type { Json, Query } from "../api/client.js";
 import { session, withAuthRecovery } from "../context.js";
 import { campaignArg, confirmArg, json, requireConfirm, safe, text } from "./registry.js";
 
@@ -176,7 +176,16 @@ export function registerRecordTools(server: McpServer): void {
         type: recordTypeArg,
         name: z.string().optional().describe("Exact name match."),
         search: z.string().optional().describe("Free-text search across the record."),
-        limit: z.number().int().min(1).max(200).optional().describe("Max results (default 50)."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .optional()
+          .describe(
+            "Max results (default 50). The API caps a page at 50, so anything above that is " +
+              "fetched by paging — `total` always reports how many exist.",
+          ),
         full: z
           .boolean()
           .optional()
@@ -188,16 +197,26 @@ export function registerRecordTools(server: McpServer): void {
       const client = session.client();
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
-        const extra: Record<string, string | number> = { $limit: Math.min(args.limit ?? 50, 200) };
+        const extra: Record<string, string | number> = {};
         if (args.name) extra.name = args.name;
         if (args.search) extra.$search = args.search;
 
-        const res = await client.findRecords<Json>(args.type, campaignId, extra);
+        // Pages past the server's hard 50-per-page cap; `$limit` alone can't exceed it.
+        const { rows, total } = await client.findAllRecords<Json>(
+          args.type,
+          campaignId,
+          extra,
+          args.limit ?? 50,
+        );
+
         return json({
           type: args.type,
-          total: res.total,
-          returned: res.data.length,
-          records: args.full ? res.data : res.data.map(summarize),
+          total,
+          returned: rows.length,
+          ...(total > rows.length
+            ? { note: `${total - rows.length} more exist — raise \`limit\` or narrow the search.` }
+            : {}),
+          records: args.full ? rows : rows.map(summarize),
         });
       });
     }),
@@ -471,16 +490,21 @@ export function registerRecordTools(server: McpServer): void {
       const client = session.client();
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
-        const query: Record<string, string | number> = {
-          campaignId,
-          $limit: Math.min(args.limit ?? 50, 200),
-        };
+        const query: Query = { campaignId };
         if (args.name) query.name = args.name;
-        const res = await client.find<Json>("/effects", query);
+
+        // Pages past the 50-row cap rather than pretending `$limit` can beat it.
+        const rows = await client.findAll<Json>("/effects", query);
+        const limited = rows.slice(0, args.limit ?? 50);
+
         return json(
           {
-            total: res.total,
-            effects: args.full ? res.data : res.data.map(summarize),
+            total: rows.length,
+            returned: limited.length,
+            ...(rows.length > limited.length
+              ? { note: `${rows.length - limited.length} more exist — raise \`limit\`.` }
+              : {}),
+            effects: args.full ? limited : limited.map(summarize),
           },
           args.full ? 60_000 : 24_000,
         );
@@ -618,10 +642,10 @@ export function registerRecordTools(server: McpServer): void {
       const client = session.client();
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
-        const query: Record<string, string | number> = { campaignId, $limit: 50 };
+        const query: Query = { campaignId };
         if (args.name) query.name = args.name;
-        const res = await client.find<Json>("/encounters", query);
-        return json({ total: res.total, encounters: res.data });
+        const encounters = await client.findAll<Json>("/encounters", query);
+        return json({ total: encounters.length, encounters });
       });
     }),
   );

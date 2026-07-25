@@ -12,8 +12,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { Json, RealmClient } from "../api/client.js";
+import type { Json, Query, RealmClient } from "../api/client.js";
 import { session, withAuthRecovery } from "../context.js";
+import {
+  cavePathAssetsFrom,
+  cavePathStartPort,
+  effectiveShape,
+  fitCavePath,
+} from "../build/cavePath.js";
 import { campaignArg, confirmArg, json, requireConfirm, safe, text } from "./registry.js";
 
 /**
@@ -184,10 +190,10 @@ export function registerScene3dTools(server: McpServer): void {
       const client = session.client();
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
-        const query: Record<string, string | number> = { campaignId, $limit: 50 };
+        const query: Query = { campaignId };
         if (args.search) query.$search = args.search;
-        const res = await client.find<Json>("/scenes", query);
-        const rows = res.data
+        const scenes = await client.findAll<Json>("/scenes", query);
+        const rows = scenes
           .map((s) => ({
             id: s._id,
             name: s.name,
@@ -196,7 +202,7 @@ export function registerScene3dTools(server: McpServer): void {
             category: s.category,
           }))
           .filter((s) => !args.only3d || s.type === "3d");
-        return json({ total: res.total, returned: rows.length, scenes: rows });
+        return json({ total: scenes.length, returned: rows.length, scenes: rows });
       });
     }),
   );
@@ -575,6 +581,132 @@ export function registerScene3dTools(server: McpServer): void {
           `Placed ${created} object${created === 1 ? "" : "s"} on scene ${args.sceneId} ` +
             `in ${requests} request${requests === 1 ? "" : "s"}.`,
         );
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_build_cave_path",
+    {
+      title: "Chain cave wall pieces along a route",
+      description:
+        "Turn a drawn ROUTE into a correctly-connected run of cave wall pieces, then optionally " +
+        "place them. This is the same chainer the in-app Cave Draw tool uses.\n\n" +
+        "USE THIS FOR CAVES — do not place cave walls by hand. A cave wall family is a 9-piece " +
+        "connecting set (straight, waves, rounded corner, diagonal, and FOUR 45° bends), and each " +
+        "piece only joins where its port lands exactly. Placing straight pieces on cell edges " +
+        "instead gives you a blocky, stair-stepped cave rather than a winding one.\n\n" +
+        "You design the route — where the passage goes, how it winds, where it opens into " +
+        "chambers. Include DIAGONAL steps: a route that only moves along x and y can only " +
+        "produce axis-aligned walls. The route is the passage's WALL LINE, so trace one side of " +
+        "the passage, not its centre.\n\n" +
+        "Ordinary room/dungeon wall families have no bends and are rejected — use plain " +
+        "per-edge walls for those (see `realm_guide` topic `3d-rooms`).",
+      inputSchema: {
+        sceneId: z.string(),
+        family: z
+          .string()
+          .describe(
+            "The cave wall family id (from `realm_search_3d_assets` — every piece of a set " +
+              "shares one `family`).",
+          ),
+        route: z
+          .array(z.object({ x: z.number().int(), y: z.number().int() }))
+          .min(2)
+          .describe(
+            "Cells the wall run follows, in order. Gaps are filled 8-way, so waypoints at the " +
+              "corners of a winding passage are enough.",
+          ),
+        z: z.number().optional().describe("Elevation for the run. Default 0.45 (ground story)."),
+        startEdge: z
+          .enum(["north", "east", "south", "west"])
+          .optional()
+          .describe("Which cell edge the run starts on. Default `south`."),
+        waveEvery: z
+          .number()
+          .int()
+          .optional()
+          .describe("Insert a wave piece every N straight pieces so runs aren't ruler-straight. Default 3, 0 disables."),
+        apply: z.boolean().optional().describe("Place the pieces. Without this it only previews."),
+        ...campaignArg,
+      },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      return withAuthRecovery(async () => {
+        const campaignId = await session.resolveCampaignId(client, args.campaign);
+
+        const family = await client.assets3d<CatalogRow>({ family: args.family });
+        if (family.length === 0) {
+          return text(
+            `No assets in family "${args.family}". Find a cave family with ` +
+              `\`realm_search_3d_assets\` (role: "wall") — every piece of a set shares one \`family\`.`,
+          );
+        }
+
+        const pieces = family.map((a) => ({
+          id: a.assetId,
+          ...(a.shape ? { shape: a.shape } : {}),
+          ...(a.depth !== undefined ? { depth: a.depth } : {}),
+        }));
+        const set = cavePathAssetsFrom(pieces);
+        if (!set) {
+          return text(
+            `"${args.family}" has no 45° bend pieces, so it's an ordinary wall family rather ` +
+              `than a cave set. Build with it using plain per-edge walls instead — one piece per ` +
+              `cell edge, rot 0=N/6=E/12=S/18=W. Cave families ship straight + waves + rounded ` +
+              `corner + diagonal + four bends.`,
+          );
+        }
+
+        const edges = { north: 0, east: 6, south: 12, west: 18 };
+        const first = args.route[0]!;
+        const depth = pieces.find((p) => p.depth !== undefined)?.depth ?? 0.65;
+        const start = cavePathStartPort(first, edges[args.startEdge ?? "south"], 1, depth);
+
+        const chained = fitCavePath(args.route, set, start, args.waveEvery ?? 3);
+        if (chained.length === 0) {
+          return text(
+            "Couldn't chain any pieces from that route. Check the route starts where you expect " +
+              "and moves cell-by-cell; try a different `startEdge`.",
+          );
+        }
+
+        const zPos = args.z ?? 0.45;
+        const objects = chained.map((p) => ({
+          campaignId,
+          sceneId: args.sceneId,
+          layerIndex: 0,
+          kind: "tile" as const,
+          assetId: p.assetId,
+          pos: { x: p.cell.x, y: p.cell.y, z: zPos },
+          rot: p.rot,
+          blocksVision: true,
+        }));
+
+        // Which piece types actually got used — the quickest way to see whether a
+        // route produced curves or just straights.
+        const byShape: Record<string, number> = {};
+        for (const p of chained) {
+          const shape = effectiveShape({ id: p.assetId }) ?? "straight";
+          byShape[shape] = (byShape[shape] ?? 0) + 1;
+        }
+
+        if (!args.apply) {
+          return json({
+            preview: true,
+            pieces: chained.length,
+            byShape,
+            sample: objects.slice(0, 5),
+            next: "Re-run with apply: true to place these.",
+          });
+        }
+
+        await resolveScene(client, args.sceneId, campaignId);
+        for (let i = 0; i < objects.length; i += CHUNK) {
+          await client.createSceneObjects3d(objects.slice(i, i + CHUNK));
+        }
+        return json({ placed: objects.length, byShape });
       });
     }),
   );

@@ -94,6 +94,22 @@ describe("documented conventions", () => {
     expect(doc).toMatch(/FOUR bends/);
   });
 
+  it("tells the reader to use the cave chainer rather than placing walls by hand", async () => {
+    const doc = await read("3d-caves.md");
+    expect(doc).toMatch(/Do not place cave walls by hand/i);
+    expect(doc).toContain("realm_build_cave_path");
+  });
+
+  it("distinguishes cave walls from ordinary room walls", async () => {
+    expect(await read("3d-caves.md")).toMatch(/Caves are not rooms/i);
+  });
+
+  it("gives concrete passage and chamber sizes", async () => {
+    const doc = await read("3d-caves.md");
+    expect(doc).toMatch(/3 cells wide minimum/i);
+    expect(doc).toMatch(/diagonal/i);
+  });
+
   it("tells the reader they can pick assets from the whole catalog, not just a kit", async () => {
     expect(await read("3d-rooms.md")).toContain("realm_search_3d_assets");
   });

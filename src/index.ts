@@ -19,7 +19,7 @@ import { registerScene3dTools } from "./tools/scenes3d.js";
 import { registerTokenTools } from "./tools/tokens.js";
 
 export const SERVER_NAME = "realmvtt";
-export const SERVER_VERSION = "0.2.0";
+export const SERVER_VERSION = "0.3.0";
 
 export function createServer(): McpServer {
   const server = new McpServer(

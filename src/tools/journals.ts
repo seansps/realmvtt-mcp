@@ -9,7 +9,7 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { Json } from "../api/client.js";
+import type { Json, Query } from "../api/client.js";
 import { session, withAuthRecovery } from "../context.js";
 import { campaignArg, confirmArg, json, requireConfirm, safe, text } from "./registry.js";
 
@@ -25,12 +25,12 @@ export function registerJournalTools(server: McpServer): void {
       const client = session.client();
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
-        const query: Record<string, string | number> = { campaignId, $limit: 50 };
+        const query: Query = { campaignId };
         if (args.name) query.name = args.name;
-        const res = await client.find<Json>("/journals", query);
+        const journals = await client.findAll<Json>("/journals", query);
         return json({
-          total: res.total,
-          journals: res.data.map((j) => ({ id: j._id, name: j.name, category: j.category })),
+          total: journals.length,
+          journals: journals.map((j) => ({ id: j._id, name: j.name, category: j.category })),
         });
       });
     }),

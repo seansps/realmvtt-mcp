@@ -234,6 +234,36 @@ export class RealmClient {
     return this.find<T>(path, query);
   }
 
+  /**
+   * Like {@link findRecords} but pages past the server's 50-row cap.
+   *
+   * `$limit` is NOT a way around that cap — the service clamps every page to 50
+   * however large a limit you ask for, so a request for 200 quietly returns 50.
+   * Anything wanting more has to walk `$skip`.
+   */
+  async findAllRecords<T = Json>(
+    recordType: string,
+    campaignId: string,
+    extra: Query = {},
+    max = 500,
+  ): Promise<{ rows: T[]; total: number }> {
+    const { path, carriesRecordType } = this.recordEndpoint(recordType);
+    const query: Query = { campaignId, ...extra };
+    if (carriesRecordType) query.recordType = recordType;
+
+    const rows: T[] = [];
+    let total = 0;
+    let skip = 0;
+    for (;;) {
+      const page = await this.find<T>(path, { ...query, $limit: PAGE, $skip: skip });
+      total = page.total ?? rows.length + page.data.length;
+      rows.push(...page.data);
+      skip += PAGE;
+      if (page.data.length === 0 || rows.length >= total || rows.length >= max) break;
+    }
+    return { rows: rows.slice(0, max), total };
+  }
+
   async createRecord<T = Json>(recordType: string, payload: Json): Promise<T> {
     const { path, carriesRecordType } = this.recordEndpoint(recordType);
     const body = { ...payload };
