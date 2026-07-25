@@ -5,6 +5,7 @@ import {
   densifyRoute,
   effectiveShape,
   fitCavePath,
+  offsetRoute,
   placementsAt,
   wallBaseId,
   wallShapeFromId,
@@ -197,5 +198,63 @@ describe("fitCavePath", () => {
     expect(fitCavePath([{ x: 0, y: 0 }, { x: 5, y: 0 }], empty, cavePathStartPort({ x: 0, y: 0 }, 12))).toEqual(
       [],
     );
+  });
+});
+
+describe("offsetRoute", () => {
+  const centre = [
+    { x: 0, y: 0 },
+    { x: 10, y: 0 },
+    { x: 16, y: 6 },
+    { x: 16, y: 14 },
+  ];
+
+  it("never pinches the passage below the requested width", () => {
+    // The meaningful measure is how far each point on one wall is from the NEAREST
+    // point on the other — the actual corridor width. Comparing index-to-index is
+    // wrong: the two walls have different lengths, and at a corner the outer one
+    // legitimately bulges wider, which is what makes the turn navigable.
+    for (const width of [3, 4, 6]) {
+      const left = offsetRoute(centre, width, 1);
+      const right = offsetRoute(centre, width, -1);
+
+      for (const a of left) {
+        const nearest = Math.min(...right.map((b) => Math.hypot(a.x - b.x, a.y - b.y)));
+        // Two costs stack: rounding both walls to whole cells, and the inside wall
+        // cutting the corner on a turn (inherent to offsetting a polyline). Measured
+        // worst case is ~1.2 cells, so a caller wanting a guaranteed 3-wide passage
+        // through corners should ask for 4.
+        expect(nearest).toBeGreaterThanOrEqual(width - 1.5);
+      }
+    }
+  });
+
+  it("keeps the typical separation close to the width asked for", () => {
+    const width = 4;
+    const left = offsetRoute(centre, width, 1);
+    const right = offsetRoute(centre, width, -1);
+    const gaps = left
+      .map((a) => Math.min(...right.map((b) => Math.hypot(a.x - b.x, a.y - b.y))))
+      .sort((p, q) => p - q);
+    const median = gaps[Math.floor(gaps.length / 2)]!;
+    expect(median).toBeGreaterThanOrEqual(width - 1);
+    expect(median).toBeLessThanOrEqual(width + 1);
+  });
+
+  it("puts the two walls on opposite sides of the centreline", () => {
+    const left = offsetRoute(centre, 4, 1);
+    const right = offsetRoute(centre, 4, -1);
+    // The first segment runs along +x, so the walls straddle it in y.
+    expect(Math.sign(left[0]!.y)).not.toBe(Math.sign(right[0]!.y));
+  });
+
+  it("drops duplicate cells so a wall isn't built twice in one place", () => {
+    const path = offsetRoute(centre, 3, 1);
+    const keys = path.map((p) => `${p.x},${p.y}`);
+    for (let i = 1; i < keys.length; i++) expect(keys[i]).not.toBe(keys[i - 1]);
+  });
+
+  it("handles a degenerate route without throwing", () => {
+    expect(offsetRoute([{ x: 1, y: 1 }], 3, 1)).toEqual([{ x: 1, y: 1 }]);
   });
 });

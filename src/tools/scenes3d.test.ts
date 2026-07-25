@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { CHUNK, compactAsset, resolveRot, rotFacing, sceneTypeOf, toModel3D } from "./scenes3d.js";
+import {
+  CHUNK,
+  DECOR_TOP_MARGIN,
+  WALL_HEIGHT,
+  backedOntoWall,
+  compactAsset,
+  mountOnWall,
+  resolveRot,
+  rotFacing,
+  sceneTypeOf,
+  toModel3D,
+} from "./scenes3d.js";
 
 /**
  * A scene has no `renderer` field — its type is `sceneType` on the ACTIVE LAYER.
@@ -240,5 +251,101 @@ describe("resolveRot", () => {
     expect(() => resolveRot({ kind: "prop", assetId: "c", facing: { x: 1, y: 1 } })).toThrow(
       /needs a `pos`/,
     );
+  });
+});
+
+/**
+ * Props that touch a wall. Three bugs came from placing these by hand: torches
+ * floating off the face, bookcases short of it, and a hearth sunk into the masonry.
+ */
+describe("mountOnWall", () => {
+  const wall = { x: 5, y: 5, rot: 0 }; // north edge; the room lies to −y
+
+  it("mounts decor on the wall's INNER FACE, not its cell centre", () => {
+    const m = mountOnWall(wall);
+    // 0.5 − 0.65 − 0.12 = −0.27 outward → 0.27 into the room.
+    expect(m.pos.y).toBeCloseTo(5 - 0.27, 6);
+    expect(m.pos.x).toBe(5);
+  });
+
+  it("uses the wall's OWN edge rot — flipping it faces the piece into the wall", () => {
+    for (const rot of [0, 6, 12, 18]) {
+      expect(mountOnWall({ x: 0, y: 0, rot }).rot).toBe(rot);
+    }
+  });
+
+  it("inherits the wall's base as mountCullZ so decor cuts away with its wall", () => {
+    expect(mountOnWall(wall, { wallBaseZ: 2.45 }).mountCullZ).toBe(2.45);
+  });
+
+  it("mounts up the wall by heightFrac", () => {
+    expect(mountOnWall(wall, { wallBaseZ: 0.45, heightFrac: 0.6 }).pos.z).toBeCloseTo(1.65, 6);
+  });
+
+  it("keeps a tall piece's top under the wall top", () => {
+    const z = mountOnWall(wall, { wallBaseZ: 0.45, heightFrac: 0.9, propHeight: 1 }).pos.z;
+    expect(z + 1).toBeLessThanOrEqual(0.45 + WALL_HEIGHT - DECOR_TOP_MARGIN + 1e-9);
+  });
+
+  it("offsets into the room on every edge", () => {
+    expect(mountOnWall({ x: 5, y: 5, rot: 12 }).pos.y).toBeCloseTo(5.27, 6);
+    expect(mountOnWall({ x: 5, y: 5, rot: 6 }).pos.x).toBeCloseTo(4.73, 6);
+    expect(mountOnWall({ x: 5, y: 5, rot: 18 }).pos.x).toBeCloseTo(5.27, 6);
+  });
+});
+
+describe("backedOntoWall", () => {
+  const wall = { x: 5, y: 5, rot: 0 };
+
+  it("seats the prop OUT of the wall, its back on the wall face", () => {
+    // Wall inner face is 0.15 into the room; a 0.7-deep prop centres 0.5 in.
+    expect(backedOntoWall(wall).pos.y).toBeCloseTo(4.5, 6);
+  });
+
+  it("faces the prop into the room, away from its wall", () => {
+    for (const rot of [0, 6, 12, 18]) {
+      expect(backedOntoWall({ x: 5, y: 5, rot }).rot).toBe(rot);
+    }
+  });
+
+  it("sits on the given walking surface", () => {
+    expect(backedOntoWall(wall, { surfaceZ: 2.9 }).pos.z).toBe(2.9);
+  });
+
+  it("pulls a deeper prop further out so it doesn't clip the wall", () => {
+    expect(backedOntoWall(wall, { propDepth: 1.2 }).pos.y).toBeLessThan(
+      backedOntoWall(wall, { propDepth: 0.4 }).pos.y,
+    );
+  });
+});
+
+describe("resolveRot with wall references", () => {
+  it("resolves onWall into position, rot and mountCullZ", () => {
+    const out = resolveRot({
+      kind: "prop",
+      assetId: "torch",
+      pos: { z: 0.45 },
+      onWall: { x: 5, y: 5, rot: 0, heightFrac: 0.6 },
+    });
+    expect(out).not.toHaveProperty("onWall");
+    expect(out.rot).toBe(0);
+    expect(out.mountCullZ).toBe(0.45);
+    expect((out.pos as { y: number }).y).toBeCloseTo(4.73, 6);
+  });
+
+  it("resolves againstWall onto the adjacent floor cell", () => {
+    const out = resolveRot({
+      kind: "prop",
+      assetId: "bookcase",
+      pos: { z: 0.45 },
+      againstWall: { x: 5, y: 5, rot: 0 },
+    });
+    expect(out).not.toHaveProperty("againstWall");
+    expect((out.pos as { y: number }).y).toBeCloseTo(4.5, 6);
+    expect(out.rot).toBe(0);
+  });
+
+  it("rejects a wall reference missing its edge rot", () => {
+    expect(() => resolveRot({ assetId: "t", onWall: { x: 1, y: 1 } })).toThrow(/x, y, rot/);
   });
 });

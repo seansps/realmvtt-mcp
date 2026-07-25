@@ -353,6 +353,50 @@ export function densifyRoute(
 }
 
 /**
+ * Offset a passage CENTRELINE into the two wall lines either side of it.
+ *
+ * The chainer traces a wall, not a passage — so a caller thinking in passages has
+ * to hand-trace two parallel polylines, and any drift between them makes the
+ * passage pinch. Given a centreline and a width in cells, this produces both walls
+ * at a guaranteed constant separation.
+ *
+ * The perpendicular is taken from the local direction (averaged across a corner so
+ * the offset turns smoothly), and points are rounded to cells with consecutive
+ * duplicates dropped.
+ */
+export function offsetRoute(
+  centre: Array<{ x: number; y: number }>,
+  width: number,
+  side: 1 | -1,
+): Array<{ x: number; y: number }> {
+  const path = densifyRoute(centre);
+  if (path.length < 2) return path.slice();
+
+  const half = width / 2;
+  const out: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i < path.length; i++) {
+    const prev = path[Math.max(0, i - 1)]!;
+    const next = path[Math.min(path.length - 1, i + 1)]!;
+    // Direction across the joint, so a corner's offset bisects rather than jumping.
+    let dx = next.x - prev.x;
+    let dy = next.y - prev.y;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len;
+    dy /= len;
+
+    const p = path[i]!;
+    const cell = {
+      x: Math.round(p.x + -dy * half * side),
+      y: Math.round(p.y + dx * half * side),
+    };
+    const last = out[out.length - 1];
+    if (!last || last.x !== cell.x || last.y !== cell.y) out.push(cell);
+  }
+  return out;
+}
+
+/**
  * Turn a route into a chain of connected pieces.
  *
  * Holds an open port and, for each cell, picks by the angle between the port's

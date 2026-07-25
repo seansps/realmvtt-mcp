@@ -209,7 +209,49 @@ Props are base-anchored: `pos.z` is where the bottom of the model sits.
 
 ---
 
-## 6. Doors and windows
+## 6. Props that touch a wall
+
+Three things go wrong when a prop is positioned against a wall by hand, and all
+three come from the same fact: **a wall does not fill its cell.** It's inset by its
+own depth (0.65), so its inner FACE sits 0.15 into the room from the cell centre —
+not at the cell boundary, and not at the cell centre.
+
+Name the wall instead of computing the position:
+
+```jsonc
+// MOUNTED decor — torch, sconce, painting, banner
+{ "kind": "prop", "assetId": "torch",
+  "pos": { "z": 0.45 },                       // the wall's base
+  "onWall": { "x": 5, "y": 5, "rot": 0, "heightFrac": 0.6 } }
+
+// FLOOR-STANDING back-to-wall — bookcase, wardrobe, hearth, altar, workbench
+{ "kind": "prop", "assetId": "bookcase",
+  "pos": { "z": 0.45 },                       // the walking surface
+  "againstWall": { "x": 5, "y": 5, "rot": 0 } }
+```
+
+Both take the host wall's cell and the edge rot it hugs, and derive position,
+facing, and (for mounted decor) `mountCullZ`.
+
+What each fixes:
+
+- **Torches floating off the wall** — mounting at the wall's cell centre leaves the
+  piece hanging 0.27 out in the room. `onWall` puts its back on the face.
+- **Bookcases not flush** — placing one at the *adjacent* cell's centre leaves a
+  ~0.5 gap. `againstWall` seats its back against the face.
+- **A hearth sunk into the masonry** — placing it on the wall's own cell buries it.
+  `againstWall` stands it out of the wall.
+
+Two rules worth knowing even when using the helpers:
+
+**Mounted decor uses the wall's OWN edge rot** — N→0, E→6, S→12, W→18 — because
+these GLBs are baked with their flat BACK on +Z. Flipping it (the intuitive move)
+mounts the piece facing into the wall.
+
+**Mounted decor needs `mountCullZ`** set to the wall's base, so it dissolves *with*
+its wall during cutaway rather than hanging in mid-air after the wall cuts away.
+
+## 7. Doors and windows
 
 A door or window is a `prop` placed on a wall's edge, carrying a `portal`:
 
@@ -273,7 +315,7 @@ Only doors can be secret or locked — a window is always operable and visible.
 
 ---
 
-## 7. Lights
+## 8. Lights
 
 A bare `kind: "light"` object is a light with no mesh. A **light-emitting prop**
 (torch, lantern, brazier) must carry the catalog asset's `light` blob **on the
@@ -297,7 +339,7 @@ Light is expensive — a torch every 6–8 cells along a corridor is plenty.
 
 ---
 
-## 8. Roofs
+## 9. Roofs
 
 A roof is **one parametric object** spanning a whole footprint, not many tiles:
 
@@ -323,7 +365,7 @@ have no GLB — the mesh is generated at render time.
 
 ---
 
-## 9. Creatures are not scenery
+## 10. Creatures are not scenery
 
 Everything above is **scenery** — `scene-objects-3d` rows placed with
 `realm_place_objects`. Creatures are different: a goblin on the map is a **token**,
@@ -354,7 +396,7 @@ y:12` stands on the floor tile at `19,12`.
 - Both fields are ignored on 2D scenes, which is what `realm_place_tokens` will
   tell you if you send them.
 
-## 10. Pin what you build
+## 11. Pin what you build
 
 A scene opens at its default framing. Build a map at (40, 25) and the GM arrives
 looking at empty ground, with no clue where it went.
@@ -373,7 +415,7 @@ Beyond that one, add pins, **teleporters** and **text blocks** only when asked.
 Teleporters change how a map plays, and unrequested floating labels make a scene
 read like a diagram instead of a place.
 
-## 11. Checklist before placing
+## 12. Checklist before placing
 
 - [ ] Every `assetId` exists — verify with `realm_search_3d_assets` first. An
       unknown id renders as a magenta "missing asset" marker.
@@ -381,6 +423,7 @@ read like a diagram instead of a place.
 - [ ] One wall per shared edge, and no wall underneath a door or window.
 - [ ] Doors/windows from the same `family` as their wall.
 - [ ] Props that look at something use `facing`, not a hand-computed `rot`.
+- [ ] Anything touching a wall uses `onWall` (decor) or `againstWall` (furniture).
 - [ ] A `Main Location` pin marks the build (`realm_add_pin`, `makeDefault: true`).
 - [ ] Lit props carry the asset's `light` blob on the placement.
 - [ ] Props rest on a surface z (`floor z + 0.45`), not on the tile's z.

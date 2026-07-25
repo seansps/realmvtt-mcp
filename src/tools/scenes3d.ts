@@ -19,6 +19,7 @@ import {
   cavePathStartPort,
   effectiveShape,
   fitCavePath,
+  offsetRoute,
 } from "../build/cavePath.js";
 import { campaignArg, confirmArg, json, requireConfirm, safe, text } from "./registry.js";
 
@@ -164,6 +165,126 @@ export function rotFacing(dx: number, dy: number): number {
   return dx < 0 ? ROT_EAST : ROT_WEST;
 }
 
+/** Standard wall through-thickness, in cubes. */
+export const WALL_DEPTH = 0.65;
+export const WALL_HEIGHT = 2.0;
+/** Extra inset into the room past the wall's inner face, so decor isn't buried. */
+export const WALL_BACK_INSET = 0.12;
+/** Clearance kept between mounted decor's top and the wall's top. */
+export const DECOR_TOP_MARGIN = 0.25;
+
+/** The direction a wall edge faces OUTWARD, away from the room it encloses. */
+export function exteriorDir(rot: number): { x: number; y: number } {
+  switch (((rot % 24) + 24) % 24) {
+    case ROT_NORTH:
+      return { x: 0, y: 1 };
+    case ROT_SOUTH:
+      return { x: 0, y: -1 };
+    case ROT_EAST:
+      return { x: 1, y: 0 };
+    default:
+      return { x: -1, y: 0 };
+  }
+}
+
+/**
+ * Mount z for wall decor of known height: centred at `heightFrac` up the wall, then
+ * clamped so it neither pokes through the wall top nor sinks below its base.
+ *
+ * Props are BASE-anchored, so this is where the piece STARTS, not where it centres —
+ * without the height correction a 1-cube painting mounted at half of a 2-cube wall
+ * runs its top into the floor slab above.
+ */
+export function mountZ(
+  wallBaseZ: number,
+  wallHeight: number,
+  heightFrac: number,
+  propHeight = 0,
+): number {
+  const anchored = wallBaseZ + wallHeight * heightFrac;
+  if (propHeight <= 0) return anchored;
+  const centered = anchored - propHeight / 2;
+  const top = Math.max(wallBaseZ, wallBaseZ + wallHeight - propHeight - DECOR_TOP_MARGIN);
+  return Math.min(Math.max(centered, wallBaseZ), top);
+}
+
+/**
+ * Place WALL-MOUNTED decor — a torch, sconce, painting, banner — flush on a wall's
+ * interior face.
+ *
+ * Two things make this fiddly enough that hand-placement leaves torches floating:
+ *
+ *  - The wall's inner face is NOT the cell boundary. A wall is inset by its own
+ *    depth, so the face sits `0.5 − depth` from the cell centre; mounting at the
+ *    cell centre leaves the piece hanging in mid-air, out in the room.
+ *  - Wall decor GLBs are baked with their flat BACK on +Z, so the rot byte is the
+ *    wall's OWN edge rot — NOT the opposite. Flipping it (the intuitive move) mounts
+ *    the piece facing into the wall.
+ *
+ * Ported from roomGen/wallLightMount.ts so both agree.
+ */
+export function mountOnWall(
+  wall: { x: number; y: number; rot: number },
+  opts: {
+    wallBaseZ?: number;
+    wallHeight?: number;
+    wallDepth?: number;
+    heightFrac?: number;
+    propHeight?: number;
+  } = {},
+): { pos: { x: number; y: number; z: number }; rot: number; mountCullZ: number } {
+  const wallBaseZ = opts.wallBaseZ ?? 0.45;
+  const wallHeight = opts.wallHeight ?? WALL_HEIGHT;
+  const wallDepth = opts.wallDepth ?? WALL_DEPTH;
+  const ext = exteriorDir(wall.rot);
+  // Cell centre → outer boundary is +0.5 outward; the inner face is at (0.5 − depth);
+  // go a touch further into the room so the back sits flush rather than buried.
+  const offset = 0.5 - wallDepth - WALL_BACK_INSET;
+
+  return {
+    pos: {
+      x: wall.x + ext.x * offset,
+      y: wall.y + ext.y * offset,
+      z: mountZ(wallBaseZ, wallHeight, opts.heightFrac ?? 0.6, opts.propHeight ?? 0),
+    },
+    rot: ((wall.rot % 24) + 24) % 24,
+    // Decor must inherit its WALL's base for cutaway, or a high-mounted torch
+    // vanishes off a wall that's still fully visible.
+    mountCullZ: wallBaseZ,
+  };
+}
+
+/**
+ * Place a FLOOR-STANDING prop with its back to a wall — a bookcase, wardrobe,
+ * hearth, altar, workbench.
+ *
+ * These do NOT go on the wall's own cell: that buries them in the masonry, which is
+ * what puts a fireplace half inside the wall. They stand on the floor cell NEXT to
+ * the wall, nudged back so the gap closes, facing into the room.
+ */
+export function backedOntoWall(
+  wall: { x: number; y: number; rot: number },
+  opts: { surfaceZ?: number; wallDepth?: number; propDepth?: number } = {},
+): { pos: { x: number; y: number; z: number }; rot: number } {
+  const ext = exteriorDir(wall.rot);
+  const wallDepth = opts.wallDepth ?? WALL_DEPTH;
+  // The wall's inner FACE sits (wallDepth − 0.5) into the room from its cell centre.
+  // For the prop's BACK to meet that face, its centre goes half its own depth further
+  // in. Placing it at the next cell's centre instead leaves the visible gap.
+  const halfProp = (opts.propDepth ?? 0.7) / 2;
+  const inward = wallDepth - 0.5 + halfProp;
+
+  return {
+    pos: {
+      x: wall.x - ext.x * inward,
+      y: wall.y - ext.y * inward,
+      z: opts.surfaceZ ?? 0.45,
+    },
+    // Front points away from the wall, into the room — the opposite of the edge rot.
+    rot: rotFacing(-ext.x, -ext.y),
+  };
+}
+
 /**
  * Resolve a placement's rotation, turning a `facing` point into a rot byte.
  *
@@ -172,6 +293,38 @@ export function rotFacing(dx: number, dy: number): number {
  * is the difference between chairs facing their table and chairs facing the wall.
  */
 export function resolveRot(object: Json): Json {
+  // `onWall` / `againstWall` name a wall cell and derive pos + rot + mountCullZ,
+  // which is what stops torches floating and hearths sinking into the masonry.
+  const wallRef = (object.onWall ?? object.againstWall) as
+    | { x?: number; y?: number; rot?: number; heightFrac?: number; propHeight?: number; propDepth?: number }
+    | undefined;
+
+  if (wallRef) {
+    if (typeof wallRef.x !== "number" || typeof wallRef.y !== "number" || typeof wallRef.rot !== "number") {
+      throw new Error(
+        "`onWall`/`againstWall` needs the host wall's { x, y, rot } — its cell and the edge it hugs.",
+      );
+    }
+    const wall = { x: wallRef.x, y: wallRef.y, rot: wallRef.rot };
+    const pos = object.pos as { z?: number } | undefined;
+    const { onWall: _a, againstWall: _b, ...rest } = object;
+
+    if (object.onWall) {
+      const mounted = mountOnWall(wall, {
+        ...(typeof pos?.z === "number" ? { wallBaseZ: pos.z } : {}),
+        ...(wallRef.heightFrac !== undefined ? { heightFrac: wallRef.heightFrac } : {}),
+        ...(wallRef.propHeight !== undefined ? { propHeight: wallRef.propHeight } : {}),
+      });
+      return { ...rest, pos: mounted.pos, rot: mounted.rot, mountCullZ: mounted.mountCullZ };
+    }
+
+    const backed = backedOntoWall(wall, {
+      ...(typeof pos?.z === "number" ? { surfaceZ: pos.z } : {}),
+      ...(wallRef.propDepth !== undefined ? { propDepth: wallRef.propDepth } : {}),
+    });
+    return { ...rest, pos: backed.pos, rot: backed.rot };
+  }
+
   const facing = object.facing as { x?: number; y?: number } | undefined;
   if (!facing || typeof facing.x !== "number" || typeof facing.y !== "number") {
     const { facing: _drop, ...rest } = object;
@@ -605,6 +758,15 @@ export function registerScene3dTools(server: McpServer): void {
         "surface by setting pos.z to that surface's z.\n" +
         "• A light-emitting prop must carry the catalog asset's `light` blob on the PLACEMENT — " +
         "the renderer reads the placed object's light, not the asset's.\n" +
+        "• ANYTHING THAT TOUCHES A WALL should name the wall instead of being positioned by hand:\n" +
+        "  - `onWall: {x, y, rot, heightFrac?}` for MOUNTED decor (torch, sconce, painting, " +
+        "banner). A wall's inner face is inset by its own depth, so mounting at the cell centre " +
+        "leaves the piece floating out in the room; this also sets `mountCullZ` so it cuts away " +
+        "with its wall.\n" +
+        "  - `againstWall: {x, y, rot}` for FLOOR-STANDING back-to-wall furniture (bookcase, " +
+        "wardrobe, hearth, altar, workbench). These go on the floor cell NEXT to the wall, not on " +
+        "the wall's own cell — putting them on the wall cell sinks them into the masonry.\n" +
+        "  Both take the host wall's cell and edge rot, and derive position and facing.\n" +
         "Call `realm_guide` with topic `3d-scene-authoring` before building anything substantial.",
       inputSchema: {
         sceneId: z.string(),
@@ -671,8 +833,21 @@ export function registerScene3dTools(server: McpServer): void {
           .array(z.object({ x: z.number().int(), y: z.number().int() }))
           .min(2)
           .describe(
-            "Cells the wall run follows, in order. Gaps are filled 8-way, so waypoints at the " +
-              "corners of a winding passage are enough.",
+            "Cells the run follows, in order. Gaps are filled 8-way, so waypoints at the corners " +
+              "of a winding passage are enough. By default this is the WALL line; with `width` " +
+              "it's the passage CENTRELINE instead.",
+          ),
+        width: z
+          .number()
+          .min(2)
+          .max(20)
+          .optional()
+          .describe(
+            "Treat `route` as the passage CENTRELINE and build BOTH walls this many cells apart. " +
+              "Strongly preferred — it keeps the two walls a constant distance apart and saves " +
+              "tracing two polylines that drift together. Use 3+ for a walkable passage, 8–15 " +
+              "for a chamber. Note the inside wall cuts corners slightly, so a passage pinches " +
+              "by up to ~1 cell on a turn — ask for one more than your true minimum.",
           ),
         z: z.number().optional().describe("Elevation for the run. Default 0.45 (ground story)."),
         startEdge: z
@@ -717,17 +892,43 @@ export function registerScene3dTools(server: McpServer): void {
         }
 
         const edges = { north: 0, east: 6, south: 12, west: 18 };
-        const first = args.route[0]!;
         const depth = pieces.find((p) => p.depth !== undefined)?.depth ?? 0.65;
-        const start = cavePathStartPort(first, edges[args.startEdge ?? "south"], 1, depth);
+        const waveEvery = args.waveEvery ?? 3;
 
-        const chained = fitCavePath(args.route, set, start, args.waveEvery ?? 3);
+        // With a width, `route` is the passage centreline and BOTH walls are built
+        // from it — which is the only way to guarantee the passage stays that wide.
+        const wallRoutes = args.width
+          ? [offsetRoute(args.route, args.width, 1), offsetRoute(args.route, args.width, -1)]
+          : [args.route];
+
+        const chained = wallRoutes.flatMap((wallRoute) => {
+          const first = wallRoute[0]!;
+          const start = cavePathStartPort(first, edges[args.startEdge ?? "south"], 1, depth);
+          return fitCavePath(wallRoute, set, start, waveEvery);
+        });
+
         if (chained.length === 0) {
           return text(
             "Couldn't chain any pieces from that route. Check the route starts where you expect " +
               "and moves cell-by-cell; try a different `startEdge`.",
           );
         }
+
+        // How close each wall got to its final waypoint. A run that stops well short
+        // means the fitter ran out of connecting pieces, and the wall has an open
+        // end — the usual cause of a cave that looks like it doesn't join up.
+        const shortfalls = wallRoutes.map((wallRoute, i) => {
+          const target = wallRoute[wallRoute.length - 1]!;
+          const runs = args.width
+            ? chained.filter((_, idx) =>
+                i === 0 ? idx < chained.length / 2 : idx >= chained.length / 2,
+              )
+            : chained;
+          const last = runs[runs.length - 1];
+          if (!last) return Infinity;
+          return Math.hypot(last.cell.x - target.x, last.cell.y - target.y);
+        });
+        const worstShortfall = Math.max(...shortfalls);
 
         const zPos = args.z ?? 0.45;
         const objects = chained.map((p) => ({
@@ -749,12 +950,37 @@ export function registerScene3dTools(server: McpServer): void {
           byShape[shape] = (byShape[shape] ?? 0) + 1;
         }
 
+        const warnings: string[] = [];
+        if (worstShortfall > 2) {
+          warnings.push(
+            `A wall run stopped ~${Math.round(worstShortfall)} cells short of its last waypoint, ` +
+              `so it has an open end. That usually means the route turns too sharply for the ` +
+              `piece set — try gentler waypoints, or split the sharp corner into two 45° steps.`,
+          );
+        }
+        const straightOnly = Object.keys(byShape).every((s) => s === "straight");
+        if (straightOnly) {
+          warnings.push(
+            "Every piece came out straight, so this will look stair-stepped. The route has no " +
+              "diagonals or turns — add waypoints that move diagonally.",
+          );
+        }
+        if (!args.width) {
+          warnings.push(
+            "Built as a single WALL line. For a passage, pass `width` with the CENTRELINE " +
+              "instead and both walls are built at a guaranteed constant separation — separate " +
+              "calls per wall are what leaves runs that don't meet up.",
+          );
+        }
+
         if (!args.apply) {
           return json({
             preview: true,
             pieces: chained.length,
+            walls: wallRoutes.length,
             byShape,
             sample: objects.slice(0, 5),
+            ...(warnings.length ? { warnings } : {}),
             next: "Re-run with apply: true to place these.",
           });
         }
@@ -763,7 +989,12 @@ export function registerScene3dTools(server: McpServer): void {
         for (let i = 0; i < objects.length; i += CHUNK) {
           await client.createSceneObjects3d(objects.slice(i, i + CHUNK));
         }
-        return json({ placed: objects.length, byShape });
+        return json({
+          placed: objects.length,
+          walls: wallRoutes.length,
+          byShape,
+          ...(warnings.length ? { warnings } : {}),
+        });
       });
     }),
   );
