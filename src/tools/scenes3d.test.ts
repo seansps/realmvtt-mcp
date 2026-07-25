@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactAsset, sceneTypeOf, toModel3D } from "./scenes3d.js";
+import { CHUNK, compactAsset, sceneTypeOf, toModel3D } from "./scenes3d.js";
 
 /**
  * A scene has no `renderer` field — its type is `sceneType` on the ACTIVE LAYER.
@@ -157,5 +157,29 @@ describe("compactAsset", () => {
       light: { color: "#ffd9a0", intensity: 3, range: 4 },
     });
     expect(row.light).toEqual({ color: "#ffd9a0", intensity: 3, range: 4 });
+  });
+});
+
+describe("bulk placement", () => {
+  it("sends a whole scene in one request", async () => {
+    // A town-sized build (~3,300 objects) is well under the server's 50MB body
+    // limit, and scene-objects-3d declares multi-create for exactly this reason.
+    const townSized = 3264;
+    expect(Math.ceil(townSized / CHUNK)).toBe(1);
+  });
+
+  it("keeps a full chunk comfortably inside the 50MB JSON limit", () => {
+    const object = {
+      campaignId: "6880ee122b69e12313666f40",
+      sceneId: "6a584936fe3d14db5aed27e3",
+      layerIndex: 0,
+      kind: "tile",
+      assetId: "fantasy-stone-floor",
+      pos: { x: 12, y: 7, z: 0.45 },
+      rot: 6,
+      blocksVision: true,
+    };
+    const bytes = JSON.stringify(object).length * CHUNK;
+    expect(bytes).toBeLessThan(50 * 1024 * 1024 * 0.1); // under a tenth of the limit
   });
 });

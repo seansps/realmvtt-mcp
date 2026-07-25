@@ -16,8 +16,16 @@ import type { Json, RealmClient } from "../api/client.js";
 import { session, withAuthRecovery } from "../context.js";
 import { campaignArg, confirmArg, json, requireConfirm, safe, text } from "./registry.js";
 
-/** Objects per create request. The service takes an array; this keeps each POST sane. */
-const CHUNK = 250;
+/**
+ * Objects per create request.
+ *
+ * `scene-objects-3d` declares `multi: ['create','remove']` precisely so a mass
+ * placement is ONE request rather than one per cell, and the server accepts a 50 MB
+ * JSON body. A placement is ~200 bytes, so 5,000 of them is under 1 MB — meaning
+ * essentially every real scene (a whole town is ~3,300 objects) goes in a single
+ * call. This only splits payloads big enough to be worth splitting.
+ */
+export const CHUNK = 5000;
 
 export interface CatalogRow extends Json {
   assetId: string;
@@ -520,6 +528,9 @@ export function registerScene3dTools(server: McpServer): void {
       description:
         "Bulk-create placed objects on a 3D scene. campaignId/sceneId/layerIndex are filled in, so " +
         "each object only carries geometry.\n\n" +
+        "PASS EVERY OBJECT IN ONE CALL. This endpoint is built for mass placement — an entire " +
+        "building or town goes in a single request. Do NOT loop, calling it once per wall, per " +
+        "room or per floor; batch the whole build into one `objects` array.\n\n" +
         "GEOMETRY RULES (violating these produces a scene that looks wrong in the renderer):\n" +
         "• A floor slab is 0.45 thick; a tile at pos.z has its walking surface at z+0.45.\n" +
         "• Ground story: floor z=0, walls z=0.45. Walls sit ON TOP of the slab or the floor pokes " +
@@ -553,12 +564,17 @@ export function registerScene3dTools(server: McpServer): void {
         }));
 
         let created = 0;
+        let requests = 0;
         for (let i = 0; i < objects.length; i += CHUNK) {
           const batch = objects.slice(i, i + CHUNK);
           const res = await client.createSceneObjects3d<Json[]>(batch);
           created += Array.isArray(res) ? res.length : batch.length;
+          requests += 1;
         }
-        return text(`Placed ${created} object${created === 1 ? "" : "s"} on scene ${args.sceneId}.`);
+        return text(
+          `Placed ${created} object${created === 1 ? "" : "s"} on scene ${args.sceneId} ` +
+            `in ${requests} request${requests === 1 ? "" : "s"}.`,
+        );
       });
     }),
   );
