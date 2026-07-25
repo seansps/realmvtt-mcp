@@ -1,18 +1,56 @@
 /** Sign-in, identity and campaign-selection tools. */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { Json } from "../api/client.js";
+import type { Json, RealmClient } from "../api/client.js";
 import { runLogin } from "../auth/login-server.js";
 import { authStore } from "../auth/store.js";
 import { session, withAuthRecovery } from "../context.js";
 import { campaignArg, json, safe, text } from "./registry.js";
 
+/** A campaign's title is `displayName` — it has no `name` field. */
 interface Campaign extends Json {
   _id: string;
-  name?: string;
+  displayName?: string;
   inviteCode?: string;
   ownerId?: string;
   rulesetId?: string;
+}
+
+interface RulesetSummary extends Json {
+  _id: string;
+  name?: string;
+}
+
+/**
+ * Map ruleset id → ruleset name, so a campaign listing can say "D&D 5e" instead of
+ * a bare hex id. Built from the user's own rulesets plus the published ones, which
+ * together cover anything a campaign of theirs can be using.
+ */
+async function rulesetNames(client: RealmClient, ids: Set<string>): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (ids.size === 0) return names;
+
+  const collect = (rows: RulesetSummary[]) => {
+    for (const r of rows) {
+      const id = String(r._id);
+      if (r.name && ids.has(id)) names.set(id, r.name);
+    }
+  };
+
+  // Either list can fail (permissions, a service hiccup) without making the
+  // campaign listing useless — an unresolved id still prints as the id.
+  await Promise.all([
+    client
+      .find<RulesetSummary>("/owned-rulesets", { short: "true" })
+      .then((r) => collect(r.data))
+      .catch(() => undefined),
+    client
+      .find<RulesetSummary>("/ruleset-list", {})
+      .then((r) => collect(r.data))
+      .catch(() => undefined),
+  ]);
+
+  return names;
 }
 
 function daysLeft(expiresAt?: number): number | null {
@@ -128,9 +166,16 @@ export function registerAuthTools(server: McpServer): void {
           if (!byId.has(id)) byId.set(id, { ...c, role: "player" });
         }
 
-        const rows = [...byId.values()].map((c) => ({
+        const campaigns = [...byId.values()];
+        const names = await rulesetNames(
+          client,
+          new Set(campaigns.map((c) => c.rulesetId).filter(Boolean) as string[]),
+        );
+
+        const rows = campaigns.map((c) => ({
           id: String(c._id),
-          name: c.name,
+          campaign: c.displayName,
+          ruleset: c.rulesetId ? (names.get(String(c.rulesetId)) ?? String(c.rulesetId)) : null,
           inviteCode: c.inviteCode,
           role: c.role,
           rulesetId: c.rulesetId,
@@ -165,10 +210,18 @@ export function registerAuthTools(server: McpServer): void {
         const doc = await client.get<Campaign>("/campaigns", id);
         session.setState({
           campaignId: id,
-          ...(doc.name ? { campaignName: doc.name } : {}),
+          ...(doc.displayName ? { campaignName: doc.displayName } : {}),
           ...(doc.inviteCode ? { inviteCode: doc.inviteCode } : {}),
         });
-        return text(`Now working in "${doc.name ?? id}" (${id}).`);
+
+        const ruleset = doc.rulesetId
+          ? (await rulesetNames(client, new Set([String(doc.rulesetId)]))).get(String(doc.rulesetId))
+          : undefined;
+
+        return text(
+          `Now working in "${doc.displayName ?? id}" (${id})` +
+            `${ruleset ? `, which uses the ${ruleset} ruleset` : ""}.`,
+        );
       });
     }),
   );

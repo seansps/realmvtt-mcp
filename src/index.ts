@@ -18,7 +18,7 @@ import { registerRulesetTools } from "./tools/rulesets.js";
 import { registerScene3dTools } from "./tools/scenes3d.js";
 
 export const SERVER_NAME = "realmvtt";
-export const SERVER_VERSION = "0.1.1";
+export const SERVER_VERSION = "0.1.2";
 
 export function createServer(): McpServer {
   const server = new McpServer(

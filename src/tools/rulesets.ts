@@ -152,10 +152,10 @@ export function registerRulesetTools(server: McpServer): void {
           for (const r of owned.data) {
             rows.set(String(r._id), {
               id: r._id,
-              name: r.name,
+              ruleset: r.name,
               version: r.version,
               published: r.published,
-              owned: !me || String(r.ownerId ?? me) === String(me),
+              source: !me || String(r.ownerId ?? me) === String(me) ? "yours" : "shared",
             });
           }
         }
@@ -165,14 +165,20 @@ export function registerRulesetTools(server: McpServer): void {
           for (const r of list.data) {
             const id = String(r._id);
             if (rows.has(id)) continue;
-            rows.set(id, { id: r._id, name: r.name, description: r.description, published: true });
+            rows.set(id, {
+              id: r._id,
+              ruleset: r.name,
+              description: r.description,
+              published: true,
+              source: "published",
+            });
           }
         }
 
         let out = [...rows.values()];
         if (args.search) {
           const needle = args.search.toLowerCase();
-          out = out.filter((r) => String(r.name ?? "").toLowerCase().includes(needle));
+          out = out.filter((r) => String(r.ruleset ?? "").toLowerCase().includes(needle));
         }
         return json({ count: out.length, rulesets: out });
       });
