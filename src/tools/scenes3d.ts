@@ -64,6 +64,37 @@ export function compactAsset(a: CatalogRow): Json {
   return out;
 }
 
+/**
+ * The three kinds of scene:
+ *   `standard` — a 2D map built on an uploaded image. May have SEVERAL layers.
+ *   `canvas`   — 2D, but drawn rather than uploaded: no image, sized in grid squares.
+ *   `3d`       — the R3F renderer. Always exactly ONE layer; its contents are
+ *                `scene-objects-3d` rows, not layer data.
+ */
+export type SceneType = "standard" | "canvas" | "3d";
+
+/**
+ * What kind of scene this is.
+ *
+ * There is NO `renderer` field on a scene — the type lives on the active LAYER as
+ * `sceneType`. Legacy layers predate that field and fall back to `isCanvasMode`:
+ * true means a drawing canvas, absent/false means a standard 2D map.
+ *
+ * Reading a non-existent `scene.renderer` silently reports every scene as
+ * "standard", including 3D ones, which is how a perfectly good 3D scene gets
+ * refused by the 3D tools.
+ */
+export function sceneTypeOf(scene: Json): SceneType {
+  const layers = Array.isArray(scene.layers) ? (scene.layers as Json[]) : [];
+  const index = typeof scene.activeLayer === "number" ? scene.activeLayer : 0;
+  const layer = layers[index] ?? layers[0];
+  if (!layer) return "standard";
+
+  const declared = layer.sceneType;
+  if (declared === "3d" || declared === "canvas" || declared === "standard") return declared;
+  return layer.isCanvasMode === true ? "canvas" : "standard";
+}
+
 /** A Realm-provided 3D mini from the `tokens-3d` catalog. */
 export interface CatalogToken extends Json {
   assetId: string;
@@ -115,6 +146,15 @@ async function resolveScene(client: RealmClient, sceneId: string, campaignId: st
         `Pass the right \`campaign\`, or re-run \`realm_use_campaign\`.`,
     );
   }
+
+  const type = sceneTypeOf(scene);
+  if (type !== "3d") {
+    throw new Error(
+      `"${scene.name ?? sceneId}" is a ${type} scene, so 3D objects can't be placed on it. ` +
+        `Create one with \`realm_create_scene\` using type: "3d", or pick an existing 3D scene ` +
+        `with \`realm_list_scenes\` (only3d: true).`,
+    );
+  }
   return scene;
 }
 
@@ -124,10 +164,10 @@ export function registerScene3dTools(server: McpServer): void {
     {
       title: "List scenes in the campaign",
       description:
-        "List the campaign's scenes. `renderer` is `3d` for scenes built with the 3D builder, " +
+        "List the campaign's scenes. `type` is `3d` for scenes built with the 3D builder, or " +
         "`standard`/`canvas` for 2D maps — the 3D tools only apply to `3d` scenes.",
       inputSchema: {
-        only3d: z.boolean().optional().describe("Only return scenes whose renderer is `3d`."),
+        only3d: z.boolean().optional().describe("Only return 3D scenes."),
         search: z.string().optional().describe("Filter by name."),
         ...campaignArg,
       },
@@ -143,12 +183,127 @@ export function registerScene3dTools(server: McpServer): void {
           .map((s) => ({
             id: s._id,
             name: s.name,
-            renderer: s.renderer ?? "standard",
+            type: sceneTypeOf(s),
             active: s.active,
             category: s.category,
           }))
-          .filter((s) => !args.only3d || s.renderer === "3d");
+          .filter((s) => !args.only3d || s.type === "3d");
         return json({ total: res.total, returned: rows.length, scenes: rows });
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_get_scene",
+    {
+      title: "Get one scene",
+      description:
+        "Fetch a scene's settings: its type, grid, units, vision, and layer configuration. " +
+        "Use `realm_get_scene_objects` for what's placed ON a 3D scene.",
+      inputSchema: { sceneId: z.string(), ...campaignArg },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      return withAuthRecovery(async () => {
+        const scene = await client.get<Json>("/scenes", args.sceneId);
+        const layers = Array.isArray(scene.layers) ? (scene.layers as Json[]) : [];
+        const activeLayer = typeof scene.activeLayer === "number" ? scene.activeLayer : 0;
+        const layer = layers[activeLayer] ?? layers[0] ?? {};
+
+        return json({
+          id: scene._id,
+          name: scene.name,
+          type: sceneTypeOf(scene),
+          active: scene.active,
+          category: scene.category,
+          campaignId: scene.campaignId,
+          activeLayer,
+          layerCount: layers.length,
+          grid: {
+            unitsPerSquare: layer.unitsPerSquare,
+            units: layer.units,
+            gridType: layer.gridType,
+            gridPadding: layer.gridPadding,
+            ...(layer.cubeUnits ? { cubeUnits: layer.cubeUnits } : {}),
+          },
+          vision: layer.vision ?? false,
+          ...(layer.url ? { mapImage: layer.url } : {}),
+          ...(layer.canvasDimensions ? { canvasDimensions: layer.canvasDimensions } : {}),
+        });
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_get_room_kit",
+    {
+      title: "Get a room kit (coherent 3D asset set)",
+      description:
+        "Resolve a room STYLE into a matched set of 3D assets: a floor, wall families with " +
+        "thickness-matched doors and windows, a wall light, a stair, and themed prop pools. " +
+        "Call with no `style` to list the available styles.\n\n" +
+        "This is a convenient source of assets that belong together — it is NOT a layout. " +
+        "You design the room yourself (see `realm_guide` topic `3d-rooms`), and you can freely " +
+        "mix kit assets with anything from `realm_search_3d_assets`.",
+      inputSchema: {
+        style: z.string().optional().describe("Style id. Omit to list the available styles."),
+        variant: z.string().optional().describe("Subtype within the style (room type or season)."),
+        seed: z.number().optional().describe("Seed varying which assets are picked per slot."),
+      },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      return withAuthRecovery(async () => {
+        const payload: Json = {};
+        if (args.style) payload.style = args.style;
+        if (args.variant) payload.variant = args.variant;
+        if (args.seed !== undefined) payload.seed = args.seed;
+
+        const kit = await client.roomKit<Json>(payload);
+
+        // Style listing — return it as-is, it's small.
+        if (!args.style) return json(kit);
+
+        // A resolved kit carries full catalog docs for every prop slot, which is far
+        // more than the caller needs to choose assets.
+        const asset = (a: unknown) =>
+          a && typeof a === "object" ? compactAsset(a as CatalogRow) : undefined;
+        const slots = Array.isArray(kit.propSlots) ? (kit.propSlots as Json[]) : [];
+
+        return json({
+          styleId: kit.styleId,
+          label: kit.label,
+          setting: kit.setting,
+          variantId: kit.variantId,
+          variants: kit.variants,
+          exterior: kit.exterior,
+          floor: asset(kit.floor),
+          floorOptions: (Array.isArray(kit.floorOptions) ? kit.floorOptions : []).map(asset),
+          wallOptions: (Array.isArray(kit.wallOptions) ? kit.wallOptions : []).map((w) => {
+            const opt = w as Json;
+            return {
+              base: opt.base,
+              wall: asset(opt.wall),
+              door: asset(opt.door),
+              window: asset(opt.window),
+            };
+          }),
+          wallLight: kit.wallLight
+            ? {
+                asset: asset((kit.wallLight as Json).asset),
+                spacingCells: (kit.wallLight as Json).spacingCells,
+              }
+            : null,
+          stair: asset(kit.stair),
+          propSlots: slots.map((s) => ({
+            slot: s.slot,
+            arrange: s.arrange,
+            countPer25Cells: s.countPer25Cells,
+            assets: (Array.isArray(s.assets) ? s.assets : []).map((a) =>
+              (a as CatalogRow)?.assetId,
+            ),
+          })),
+        });
       });
     }),
   );

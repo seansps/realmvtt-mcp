@@ -29,6 +29,26 @@ errors you'll see.
 supports, download its ruleset (`realm_get_ruleset`) and read the `recordTypes` in
 the summary.
 
+### Scene types
+
+A scene has **no `renderer` field**. Its type is `sceneType` on the ACTIVE layer
+(`layers[activeLayer]`), and older layers omit it entirely, falling back to
+`isCanvasMode`:
+
+| Type | What it is | Layers |
+|---|---|---|
+| `standard` | 2D map built on an uploaded image (`layer.url`) | may be several |
+| `canvas` | 2D but drawn, not uploaded — no image, sized in grid squares | may be several |
+| `3d` | the 3D renderer; contents live in `scene-objects-3d` | exactly one |
+
+So resolving a scene's type means: read the active layer's `sceneType`, else
+`isCanvasMode ? "canvas" : "standard"`. `realm_list_scenes` and `realm_get_scene`
+report it as `type`.
+
+New scenes take their grid units from the campaign's ruleset
+(`settings.otherSettings.defaultUnitsPerSquare` / `defaultUnits`), which is why one
+system measures in feet and another in metres.
+
 ### Two separate 3D catalogs
 
 `assets-3d` holds **scenery** — floors, walls, doors, windows, props, lights, roofs.

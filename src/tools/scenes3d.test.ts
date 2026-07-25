@@ -1,5 +1,67 @@
 import { describe, expect, it } from "vitest";
-import { compactAsset, toModel3D } from "./scenes3d.js";
+import { compactAsset, sceneTypeOf, toModel3D } from "./scenes3d.js";
+
+/**
+ * A scene has no `renderer` field — its type is `sceneType` on the ACTIVE LAYER.
+ * Reading `scene.renderer` returns undefined for everything, so every scene looked
+ * like a 2D map and the 3D tools refused perfectly good 3D scenes.
+ */
+describe("sceneTypeOf", () => {
+  it("recognises a real 3D scene", () => {
+    // The exact document that was misreported as 2D.
+    expect(
+      sceneTypeOf({
+        name: "Test3D",
+        activeLayer: 0,
+        layers: [
+          {
+            sceneType: "3d",
+            cubeUnits: { size: 5 },
+            unitsPerSquare: 5,
+            units: "feet",
+            gridType: "square",
+            vision: true,
+          },
+        ],
+      }),
+    ).toBe("3d");
+  });
+
+  it("never trusts a `renderer` field, which does not exist on scenes", () => {
+    expect(sceneTypeOf({ renderer: "standard", layers: [{ sceneType: "3d" }] })).toBe("3d");
+  });
+
+  it("reads the ACTIVE layer, not always the first", () => {
+    const scene = { activeLayer: 1, layers: [{ sceneType: "standard" }, { sceneType: "3d" }] };
+    expect(sceneTypeOf(scene)).toBe("3d");
+  });
+
+  it("falls back to the first layer when activeLayer points nowhere", () => {
+    expect(sceneTypeOf({ activeLayer: 7, layers: [{ sceneType: "3d" }] })).toBe("3d");
+  });
+
+  it("treats a legacy canvas layer as canvas", () => {
+    expect(sceneTypeOf({ layers: [{ isCanvasMode: true }] })).toBe("canvas");
+  });
+
+  it("treats a legacy image layer as standard", () => {
+    expect(sceneTypeOf({ layers: [{ url: "/images/map.png" }] })).toBe("standard");
+    expect(sceneTypeOf({ layers: [{ isCanvasMode: false }] })).toBe("standard");
+  });
+
+  it("prefers an explicit sceneType over the legacy isCanvasMode flag", () => {
+    expect(sceneTypeOf({ layers: [{ sceneType: "3d", isCanvasMode: true }] })).toBe("3d");
+  });
+
+  it("degrades to standard for a scene with no layers at all", () => {
+    expect(sceneTypeOf({})).toBe("standard");
+    expect(sceneTypeOf({ layers: [] })).toBe("standard");
+  });
+
+  it("ignores an unrecognised sceneType rather than passing it through", () => {
+    expect(sceneTypeOf({ layers: [{ sceneType: "hologram" }] })).toBe("standard");
+  });
+});
 
 describe("toModel3D", () => {
   it("normalises modelPath to a leading slash — the catalog stores it without one", () => {

@@ -1,5 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { ASSET_CDN, cdnUrl, journalImgTag } from "./images.js";
+import { ASSET_CDN, canvasGridSize, cdnUrl, journalImgTag } from "./images.js";
+
+describe("canvasGridSize", () => {
+  it("matches the app's own numbers", () => {
+    expect(canvasGridSize(30, 30)).toBe(100); // small: capped at the max
+    expect(canvasGridSize(100, 100)).toBe(50); // lands exactly on the 25MP budget
+    expect(canvasGridSize(200, 200)).toBe(50); // large: the 50px floor takes over
+  });
+
+  it("aims at the ~25 megapixel budget until the resolution floor takes over", () => {
+    // Below the floor the budget governs...
+    const px = canvasGridSize(100, 100);
+    expect(100 * 100 * px * px).toBeLessThanOrEqual(25_000_000);
+    // ...but a big canvas keeps a legible 50px grid instead, deliberately going over.
+    // The app surfaces the resulting megapixel count to the user rather than shrinking further.
+    expect(canvasGridSize(500, 500)).toBe(50);
+  });
+
+  it("stays inside the app's 50–100 pixels-per-grid range", () => {
+    for (const [w, h] of [[1, 1], [30, 30], [100, 100], [5000, 5000]] as const) {
+      const px = canvasGridSize(w, h);
+      expect(px).toBeGreaterThanOrEqual(50);
+      expect(px).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("does not divide by zero on a degenerate canvas", () => {
+    expect(canvasGridSize(0, 0)).toBe(100);
+  });
+});
 
 describe("cdnUrl", () => {
   it("builds an absolute url from a stored path, with or without a leading slash", () => {

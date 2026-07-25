@@ -80,6 +80,61 @@ async function uploadAndRegister(
   return { path: stored, record };
 }
 
+/**
+ * A canvas scene's pixels-per-grid, matching the app's `calculateGridSize`.
+ * Keeps the rendered canvas under ~25 megapixels while staying in a sane range.
+ */
+export function canvasGridSize(width: number, height: number): number {
+  const MAX_MEGAPIXELS = 25_000_000;
+  const MAX_GRID_SIZE = 100;
+  const MIN_GRID_SIZE = 50;
+  const totalSquares = Math.max(1, width * height);
+  const gridSize = Math.floor(Math.sqrt(MAX_MEGAPIXELS / totalSquares));
+  return Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, gridSize));
+}
+
+/** An empty UVTT block — the shape every new layer carries. */
+function emptyUvtt(resolution?: Json): Json {
+  return {
+    ...(resolution ? { resolution } : {}),
+    line_of_sight: [],
+    objects_line_of_sight: [],
+    portals: [],
+    environment: { baked_lighting: false, ambient_light: "#ffffff" },
+    lights: [],
+  };
+}
+
+/**
+ * A campaign's default grid units come from its RULESET (`otherSettings`), which is
+ * why a Cyberpunk campaign measures in metres and a 5e one in feet. Falls back to
+ * the app's own defaults when there's no ruleset or it doesn't say.
+ */
+async function gridDefaults(
+  client: RealmClient,
+  campaignId: string,
+): Promise<{ unitsPerSquare: number; units: string }> {
+  const fallback = { unitsPerSquare: 5, units: "feet" };
+  try {
+    const campaign = await client.get<Json>("/campaigns", campaignId);
+    if (!campaign.rulesetId) return fallback;
+    const ruleset = await client.get<{
+      settings?: { otherSettings?: { defaultUnitsPerSquare?: number; defaultUnits?: string } };
+    }>("/rulesets", String(campaign.rulesetId));
+    const other = ruleset.settings?.otherSettings;
+    return {
+      unitsPerSquare:
+        typeof other?.defaultUnitsPerSquare === "number"
+          ? other.defaultUnitsPerSquare
+          : fallback.unitsPerSquare,
+      units: typeof other?.defaultUnits === "string" ? other.defaultUnits : fallback.units,
+    };
+  } catch {
+    // A missing or unreadable ruleset shouldn't stop a scene being created.
+    return fallback;
+  }
+}
+
 /** Resolve an existing image by record id or stored path, for tools that accept either. */
 async function resolveExistingImage(
   client: RealmClient,
@@ -179,13 +234,16 @@ export function registerImageTools(server: McpServer): void {
     {
       title: "Create a scene",
       description:
-        "Create a scene in the campaign.\n\n" +
-        "• With `imagePath` (a local file) or `image` (an existing image id/path) you get a " +
-        "standard 2D map scene using that image as its background — the same thing the app's " +
-        "'Create new Scene' produces from an upload.\n" +
-        "• With `type: 'canvas'` you get a blank drawing canvas sized in grid squares.\n" +
-        "• With `type: '3d'` you get an empty 3D scene, ready for `realm_place_objects`.\n\n" +
-        "Grid defaults to 5 ft squares; override with `unitsPerSquare` and `units`.",
+        "Create a scene in the campaign. There are three kinds:\n\n" +
+        "• `standard` — a 2D map built on an image. Pass `imagePath` (a local file to upload) " +
+        "or `image` (an existing image id/path). This is what the app's 'Create new Scene' " +
+        "produces from an upload, and it's the default when you give an image.\n" +
+        "• `canvas` — also 2D, but DRAWN rather than uploaded: no image at all, sized in grid " +
+        "squares via `width`/`height` and given a background `canvasColor`.\n" +
+        "• `3d` — the 3D renderer. No image, exactly one layer; its contents are placed " +
+        "separately with `realm_place_objects`.\n\n" +
+        "The grid defaults to the campaign RULESET's units (e.g. 5 feet), which you can " +
+        "override with `unitsPerSquare` and `units`.",
       inputSchema: {
         name: z.string().describe("Scene name."),
         imagePath: z.string().optional().describe("Local image file to upload and use as the map."),
@@ -197,8 +255,14 @@ export function registerImageTools(server: McpServer): void {
           .enum(["standard", "canvas", "3d"])
           .optional()
           .describe("Scene type. Defaults to `standard` when an image is given."),
-        unitsPerSquare: z.number().optional().describe("Game units per grid square (default 5)."),
-        units: z.string().optional().describe("Unit name (default `ft`)."),
+        unitsPerSquare: z
+          .number()
+          .optional()
+          .describe("Game units per grid square. Defaults to the ruleset's setting, else 5."),
+        units: z
+          .string()
+          .optional()
+          .describe("Unit name. Defaults to the ruleset's setting, else `feet`."),
         gridType: z.enum(["square", "hex"]).optional().describe("Grid type (default square)."),
         vision: z.boolean().optional().describe("Enable line of sight on the scene."),
         width: z.number().optional().describe("Canvas width in grid squares (canvas scenes)."),
@@ -210,12 +274,14 @@ export function registerImageTools(server: McpServer): void {
     },
     safe(async (args) => {
       const client = session.client();
-      const unitsPerSquare = args.unitsPerSquare ?? 5;
-      const units = args.units ?? "ft";
       const type = args.type ?? (args.imagePath || args.image ? "standard" : "canvas");
 
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
+
+        const defaults = await gridDefaults(client, campaignId);
+        const unitsPerSquare = args.unitsPerSquare ?? defaults.unitsPerSquare;
+        const units = args.units ?? defaults.units;
 
         let layer: Json;
         let uploaded: { path: string; record: Json } | undefined;
@@ -230,23 +296,27 @@ export function registerImageTools(server: McpServer): void {
             units,
             gridType: "square",
             vision: args.vision ?? true,
-            uvtt: {
-              line_of_sight: [],
-              objects_line_of_sight: [],
-              portals: [],
-              environment: { baked_lighting: false, ambient_light: "#ffffff" },
-              lights: [],
-            },
+            uvtt: emptyUvtt(),
           };
         } else if (type === "canvas") {
+          const width = args.width ?? 30;
+          const height = args.height ?? 30;
           layer = {
             isCanvasMode: true,
-            canvasDimensions: { width: args.width ?? 30, height: args.height ?? 30 },
-            ...(args.canvasColor ? { canvasColor: args.canvasColor } : {}),
+            canvasDimensions: { width, height },
+            canvasColor: args.canvasColor ?? null,
             unitsPerSquare,
             units,
+            gridPadding: 5,
+            gridColor: "#00000050", // the app's default grey grid, not transparent
             gridType: args.gridType ?? "square",
             vision: args.vision ?? true,
+            walls: [],
+            uvtt: emptyUvtt({
+              map_origin: { x: 0, y: 0 },
+              map_size: { x: width, y: height },
+              pixels_per_grid: canvasGridSize(width, height),
+            }),
           };
         } else {
           if (!args.imagePath && !args.image) {
