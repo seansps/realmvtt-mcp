@@ -1,0 +1,49 @@
+{
+  "name": "realmvtt-mcp",
+  "version": "0.1.0",
+  "description": "Bring your own AI agent to Realm VTT — an MCP server for campaign records, effects, rulesets, and 3D scene building.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "realmvtt-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "sync:docs": "node scripts/sync-docs.mjs",
+    "check:sync": "node scripts/sync-docs.mjs --check",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "realm-vtt",
+    "vtt",
+    "tabletop",
+    "rpg",
+    "ttrpg",
+    "claude"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "open": "^11.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10"
+  }
+}
