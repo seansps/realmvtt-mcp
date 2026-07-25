@@ -5,6 +5,8 @@
  * Speaks MCP over stdio, so anything on stdout is protocol traffic — every log,
  * warning and crash goes to stderr.
  */
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerAuthTools } from "./tools/auth.js";
@@ -16,7 +18,7 @@ import { registerRulesetTools } from "./tools/rulesets.js";
 import { registerScene3dTools } from "./tools/scenes3d.js";
 
 export const SERVER_NAME = "realmvtt";
-export const SERVER_VERSION = "0.1.0";
+export const SERVER_VERSION = "0.1.1";
 
 export function createServer(): McpServer {
   const server = new McpServer(
@@ -46,8 +48,27 @@ async function main(): Promise<void> {
   console.error(`${SERVER_NAME} MCP server ready`);
 }
 
-// Only run when executed directly, so tests can import `createServer`.
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * Are we being executed as the program, rather than imported?
+ *
+ * `process.argv[1]` must be REAL-PATHed before comparing. npm installs a bin as a
+ * symlink (`node_modules/.bin/realmvtt-mcp` → `../realmvtt-mcp/dist/index.js`),
+ * so argv[1] is the symlink while `import.meta.url` is always the resolved target.
+ * Comparing them raw means this never matches under npx or a global install — the
+ * process starts, does nothing, and exits 0 in total silence.
+ */
+function isDirectRun(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === fileURLToPath(import.meta.url);
+  } catch {
+    // argv[1] isn't a real file (bundled, or an odd loader) — assume we're the program.
+    return true;
+  }
+}
+
+if (isDirectRun()) {
   main().catch((err) => {
     console.error("Failed to start:", err);
     process.exit(1);
