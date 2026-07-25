@@ -145,11 +145,63 @@ export function toModel3D(t: CatalogToken): Json {
   };
 }
 
+export const ROT_NORTH = 0;
+export const ROT_EAST = 6;
+export const ROT_SOUTH = 12;
+export const ROT_WEST = 18;
+
+/**
+ * The rot byte whose baked front points along (dx, dy).
+ *
+ * Props are baked FRONT = −Z, so the mapping is 0→−Y, 6→−X, 12→+Y, 18→+X. The
+ * ROT_* names are the wall EDGE a piece hugs, NOT the direction it looks, which is
+ * exactly why deriving this by hand inverts so reliably — it's called out in the
+ * client as "the recurring 180° footgun". Ported verbatim from roomGen/props.ts so
+ * there is one definition, never re-derived.
+ */
+export function rotFacing(dx: number, dy: number): number {
+  if (Math.abs(dy) >= Math.abs(dx)) return dy < 0 ? ROT_NORTH : ROT_SOUTH;
+  return dx < 0 ? ROT_EAST : ROT_WEST;
+}
+
+/**
+ * Resolve a placement's rotation, turning a `facing` point into a rot byte.
+ *
+ * `facing` is a point the prop's FRONT should look at — a chair's table, a statue's
+ * doorway. Deriving the delta and the byte here means a caller never has to, which
+ * is the difference between chairs facing their table and chairs facing the wall.
+ */
+export function resolveRot(object: Json): Json {
+  const facing = object.facing as { x?: number; y?: number } | undefined;
+  if (!facing || typeof facing.x !== "number" || typeof facing.y !== "number") {
+    const { facing: _drop, ...rest } = object;
+    return rest;
+  }
+
+  const pos = object.pos as { x?: number; y?: number } | undefined;
+  if (typeof pos?.x !== "number" || typeof pos?.y !== "number") {
+    throw new Error("An object with `facing` also needs a `pos` to face from.");
+  }
+
+  const dx = facing.x - pos.x;
+  const dy = facing.y - pos.y;
+  if (dx === 0 && dy === 0) {
+    throw new Error(
+      `An object at (${pos.x}, ${pos.y}) can't face its own position — give \`facing\` a different point.`,
+    );
+  }
+
+  const { facing: _drop, ...rest } = object;
+  return { ...rest, rot: rotFacing(dx, dy) };
+}
+
 const placementSchema = z
   .record(z.string(), z.unknown())
   .describe(
     "One placed object: { kind: 'tile'|'prop'|'light', assetId, pos: {x,y,z}, rot: 0-23, " +
-      "and optionally scale, pitch, roll, blocksVision, portal, light, roof }.",
+      "and optionally scale, pitch, roll, blocksVision, portal, light, roof }. " +
+      "Instead of `rot` a PROP may carry `facing: {x, y}` — a point its front should look at — " +
+      "and the correct rot byte is worked out for you.",
   );
 
 async function resolveScene(client: RealmClient, sceneId: string, campaignId: string): Promise<Json> {
@@ -542,8 +594,13 @@ export function registerScene3dTools(server: McpServer): void {
         "• Ground story: floor z=0, walls z=0.45. Walls sit ON TOP of the slab or the floor pokes " +
         "up through doorways.\n" +
         "• Walls are one piece per cell EDGE. Edge rot: 0=north(+y), 6=east(+x), 12=south(-y), 18=west(-x).\n" +
-        "• Props are baked front=-Z, so a rot byte points the front: 0→-y, 6→-x, 12→+y, 18→+x. " +
-        "A prop against the north wall faces the room at rot 0.\n" +
+        "• FACING: rather than computing `rot` for a prop, give it `facing: {x, y}` — the point " +
+        "its front should look at — and the right byte is derived for you. A chair gets the " +
+        "table's position, a statue the doorway it watches. Deriving facing by hand inverts " +
+        "constantly (chairs end up facing the wall), so prefer `facing` for anything that looks " +
+        "at something.\n" +
+        "  If you do set `rot` yourself: props are baked front=-Z, so 0→-y, 6→-x, 12→+y, 18→+x, " +
+        "and a prop against the north wall faces the room at rot 0.\n" +
         "• An integer prop pos is the CELL CENTRE. Props are base-anchored, so rest one on a " +
         "surface by setting pos.z to that surface's z.\n" +
         "• A light-emitting prop must carry the catalog asset's `light` blob on the PLACEMENT — " +
@@ -566,7 +623,7 @@ export function registerScene3dTools(server: McpServer): void {
           campaignId,
           sceneId: args.sceneId,
           layerIndex: args.layer ?? 0,
-          ...(o as Json),
+          ...resolveRot(o as Json),
         }));
 
         let created = 0;

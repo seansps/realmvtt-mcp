@@ -202,6 +202,21 @@ export class RealmClient {
   }
 
   /**
+   * A Feathers `update` with no id — REST maps `PUT /path` to `update(null, data)`.
+   *
+   * `scene-layers` is registered this way: its `update(data, params)` reads the
+   * payload from what Feathers passes as `data`, which is why the app calls it with
+   * a null id. Used to merge a partial layer (pins, teleporters, text) without
+   * resending the whole thing.
+   */
+  async updateNoId<T = Json>(path: string, data: unknown): Promise<T> {
+    return this.fetchJson<T>(`${this.baseUrl}${path}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
    * Invoke a Feathers CUSTOM METHOD. These are not ordinary REST verbs — the
    * transport is a POST to the service path with the method name in a header.
    */

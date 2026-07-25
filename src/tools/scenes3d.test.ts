@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHUNK, compactAsset, sceneTypeOf, toModel3D } from "./scenes3d.js";
+import { CHUNK, compactAsset, resolveRot, rotFacing, sceneTypeOf, toModel3D } from "./scenes3d.js";
 
 /**
  * A scene has no `renderer` field — its type is `sceneType` on the ACTIVE LAYER.
@@ -181,5 +181,64 @@ describe("bulk placement", () => {
     };
     const bytes = JSON.stringify(object).length * CHUNK;
     expect(bytes).toBeLessThan(50 * 1024 * 1024 * 0.1); // under a tenth of the limit
+  });
+});
+
+/**
+ * The recurring 180° bug: chairs facing away from their table. The mapping is
+ * counter-intuitive because props are baked front = −Z and the ROT_* names refer to
+ * the wall EDGE a piece hugs, not where it looks — so hand-derivation inverts.
+ */
+describe("rotFacing", () => {
+  it("maps a facing direction to the byte the renderer expects", () => {
+    expect(rotFacing(0, -1)).toBe(0); // front points −y
+    expect(rotFacing(-1, 0)).toBe(6); // front points −x
+    expect(rotFacing(0, 1)).toBe(12); // front points +y
+    expect(rotFacing(1, 0)).toBe(18); // front points +x
+  });
+
+  it("resolves a diagonal to the dominant axis, preferring y on a tie", () => {
+    expect(rotFacing(0.3, -1)).toBe(0);
+    expect(rotFacing(-1, 0.3)).toBe(6);
+    expect(rotFacing(1, 1)).toBe(12); // |dy| >= |dx| → y wins
+  });
+});
+
+describe("resolveRot", () => {
+  const chairAt = (x: number, y: number) => ({
+    kind: "prop",
+    assetId: "chair",
+    pos: { x, y, z: 0.45 },
+    facing: { x: 5, y: 5 }, // the table
+  });
+
+  it("points a chair at its table from every side", () => {
+    expect(resolveRot(chairAt(5, 6)).rot).toBe(0); // south of table → faces −y
+    expect(resolveRot(chairAt(6, 5)).rot).toBe(6); // east of table  → faces −x
+    expect(resolveRot(chairAt(5, 4)).rot).toBe(12); // north of table → faces +y
+    expect(resolveRot(chairAt(4, 5)).rot).toBe(18); // west of table  → faces +x
+  });
+
+  it("strips `facing` so it never reaches the API", () => {
+    const out = resolveRot(chairAt(5, 6));
+    expect(out).not.toHaveProperty("facing");
+    expect(out).toHaveProperty("assetId", "chair");
+  });
+
+  it("leaves an explicit rot alone when there's no facing", () => {
+    const out = resolveRot({ kind: "prop", assetId: "barrel", pos: { x: 1, y: 1, z: 0 }, rot: 6 });
+    expect(out.rot).toBe(6);
+  });
+
+  it("refuses a facing point identical to the object's own position", () => {
+    expect(() =>
+      resolveRot({ kind: "prop", assetId: "c", pos: { x: 2, y: 2, z: 0 }, facing: { x: 2, y: 2 } }),
+    ).toThrow(/can't face its own position/);
+  });
+
+  it("requires a pos to face from", () => {
+    expect(() => resolveRot({ kind: "prop", assetId: "c", facing: { x: 1, y: 1 } })).toThrow(
+      /needs a `pos`/,
+    );
   });
 });

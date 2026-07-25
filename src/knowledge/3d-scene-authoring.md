@@ -176,8 +176,18 @@ Derive a prop's facing from the direction you want it to look:
 | +y (north-facing, against the south wall) | 12 |
 | +x (east-facing, against the west wall) | 18 |
 
-A chair at a table faces the table: if the chair sits at offset `(dx, dy)` from the
-table, its front must point along `(−dx, −dy)`.
+**Don't derive this by hand.** `realm_place_objects` accepts `facing: {x, y}` on a
+prop — the point its front should look at — and works the byte out for you:
+
+```jsonc
+{ "kind": "prop", "assetId": "chair", "pos": {"x":5,"y":6,"z":0.45},
+  "facing": {"x":5,"y":5} }        // the table → rot 0
+```
+
+A chair gets its table, a statue the doorway it watches, a throne the room's
+entrance. This is worth using every time, because hand-derivation inverts
+constantly — the wrong answer is always exactly 180° out, which is how a set of
+chairs ends up facing the wall instead of the table they're pulled up to.
 
 Some individual GLBs are baked off-convention and need a correction — cars whose
 length runs along model X, for instance, need `(rot + 6) % 24`. If a placed prop
@@ -344,14 +354,34 @@ y:12` stands on the floor tile at `19,12`.
 - Both fields are ignored on 2D scenes, which is what `realm_place_tokens` will
   tell you if you send them.
 
-## 10. Checklist before placing
+## 10. Pin what you build
+
+A scene opens at its default framing. Build a map at (40, 25) and the GM arrives
+looking at empty ground, with no clue where it went.
+
+So finish a new scene with a camera pin at the middle of it:
+
+```jsonc
+// realm_add_pin
+{ "sceneId": "…", "name": "Main Location", "center": true, "makeDefault": true }
+```
+
+`center: true` puts it at the middle of everything already placed; `makeDefault`
+makes the camera open there. Pins are GM-only — players never see them.
+
+Beyond that one, add pins, **teleporters** and **text blocks** only when asked.
+Teleporters change how a map plays, and unrequested floating labels make a scene
+read like a diagram instead of a place.
+
+## 11. Checklist before placing
 
 - [ ] Every `assetId` exists — verify with `realm_search_3d_assets` first. An
       unknown id renders as a magenta "missing asset" marker.
 - [ ] Walls at `z = 0.45` on the ground story, not `z = 0`.
 - [ ] One wall per shared edge, and no wall underneath a door or window.
 - [ ] Doors/windows from the same `family` as their wall.
-- [ ] Props' `rot` derived from the direction they should FACE.
+- [ ] Props that look at something use `facing`, not a hand-computed `rot`.
+- [ ] A `Main Location` pin marks the build (`realm_add_pin`, `makeDefault: true`).
 - [ ] Lit props carry the asset's `light` blob on the placement.
 - [ ] Props rest on a surface z (`floor z + 0.45`), not on the tile's z.
 
