@@ -311,7 +311,8 @@ Getting this wrong is easy and looks fine in the JSON:
 
 Behaviour, for reference: a closed secret door blocks vision and movement exactly
 like the wall it impersonates. Opening it makes it passable and visible to everyone.
-Only doors can be secret or locked — a window is always operable and visible.
+Only doors can be secret — a window is always visible. Both doors and windows can be
+`locked`, which makes them GM-only to open (players get a "Locked" message instead).
 
 ---
 
@@ -396,7 +397,25 @@ y:12` stands on the floor tile at `19,12`.
 - Both fields are ignored on 2D scenes, which is what `realm_place_tokens` will
   tell you if you send them.
 
-## 11. Pin what you build
+## 11. Your own models
+
+When the shared catalog has nothing for a piece of scenery, upload a GLB with
+`realm_upload_3d_model` and it comes back with an `assetId` that
+`realm_place_objects` takes exactly like a catalog one. It's owner-scoped, and it
+still renders for other people in a scene you share.
+
+The conventions in `realm_guide` topic `3d-assets` apply — most importantly:
+
+- **1 GLB unit = 1 grid cube = 5 ft.** A model authored in METRES needs
+  `baseScale: 0.66` (1 / 1.524); millimetres need about `0.00066`. Getting this
+  wrong is the difference between a chair and a monument.
+- **Front faces −Z**, base at y = 0, centred on x/z. A model authored facing
+  another way can be corrected on upload with `modelRotation` (degrees) rather than
+  re-exporting.
+- `role: "wall" | "door" | "window"` makes a custom model behave like a structure
+  piece — edge snapping, portals — instead of free-placed decor.
+
+## 12. Pin what you build
 
 A scene opens at its default framing. Build a map at (40, 25) and the GM arrives
 looking at empty ground, with no clue where it went.
@@ -415,7 +434,7 @@ Beyond that one, add pins, **teleporters** and **text blocks** only when asked.
 Teleporters change how a map plays, and unrequested floating labels make a scene
 read like a diagram instead of a place.
 
-## 12. Checklist before placing
+## 13. Checklist before placing
 
 - [ ] Every `assetId` exists — verify with `realm_search_3d_assets` first. An
       unknown id renders as a magenta "missing asset" marker.

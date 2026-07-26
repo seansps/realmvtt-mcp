@@ -160,6 +160,7 @@ something bespoke — the layout is the agent's to design, not a template's.
 | **Scenes** | `realm_create_scene` |
 | **Rulesets** | `realm_list_rulesets` · `realm_get_ruleset` · `realm_write_ruleset` · `realm_compile_ruleset` |
 | **3D scenes** | `realm_list_scenes` · `realm_get_scene` · `realm_search_3d_assets` · `realm_get_room_kit` · `realm_get_scene_objects` · `realm_place_objects` · `realm_update_object` · `realm_delete_objects` · `realm_clear_scene` |
+| **Custom 3D models** | `realm_upload_3d_model` · `realm_list_3d_models` |
 | **3D minis** | `realm_search_3d_tokens` · `realm_set_3d_token` |
 | **Creature tokens** | `realm_list_tokens` · `realm_place_tokens` · `realm_move_token` · `realm_delete_tokens` |
 | **Pins, teleports, text** | `realm_list_markers` · `realm_add_pin` · `realm_add_teleporter` · `realm_add_text` · `realm_delete_marker` |

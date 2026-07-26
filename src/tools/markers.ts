@@ -4,8 +4,7 @@
  * All three live on the scene LAYER, not in their own services — `layer.pins`,
  * `layer.teleporters`, `layer.textBlocks`, each an array of objects with a
  * frontend-generated `id`. So writing one is a read-modify-write of the layer,
- * done through `scene-layers` (PUT) which merges a partial layer rather than
- * making us resend everything.
+ * done by patching the scene (see writeLayer for why not the scene-layers service).
  *
  * PINS matter more than they look. A newly built scene opens the camera at its
  * default framing, which for a scene built out at, say, (40, 25) means the GM
@@ -79,17 +78,28 @@ async function getLayer(
 /**
  * Merge a partial layer back onto a scene.
  *
- * `scene-layers` takes the layer as `params` (its `update` signature is
- * `(data, params)`, which is why the app calls it with a null id) and merges it,
- * so we only send the arrays we touched.
+ * Goes through `PATCH /scenes/:id` rather than the `scene-layers` service. That
+ * service's `update` is declared `(data, params)` — Feathers' id argument lands in
+ * `data` — so the app calls it with a null id, which over REST means a PUT with no
+ * id segment. That route doesn't exist: it answers `404 Path /scene-layers not
+ * found`, which is exactly what surfaced as "the pin was created but the call
+ * failed" (the pin was NOT created; the readback found an earlier one).
+ *
+ * `layers` is part of the scene's patch schema, so writing the array back is a
+ * supported, plainly-routed operation. It is a whole-array write, so the caller
+ * passes the scene it already read and we merge into that — keeping the
+ * read-modify-write window as short as possible.
  */
 async function writeLayer(
   client: RealmClient,
   sceneId: string,
+  scene: Json,
   layerIndex: number,
-  layer: Json,
+  patch: Json,
 ): Promise<void> {
-  await client.updateNoId("/scene-layers", { sceneId, layerIndex, layer, noRedraw: true });
+  const layers = Array.isArray(scene.layers) ? [...(scene.layers as Json[])] : [];
+  layers[layerIndex] = { ...(layers[layerIndex] ?? {}), ...patch };
+  await client.patch("/scenes", sceneId, { layers });
 }
 
 export function registerMarkerTools(server: McpServer): void {
@@ -158,7 +168,7 @@ export function registerMarkerTools(server: McpServer): void {
       const client = session.client();
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
-        const { layer, layerIndex } = await getLayer(client, args.sceneId);
+        const { scene, layer, layerIndex } = await getLayer(client, args.sceneId);
 
         let x = args.x;
         let y = args.y;
@@ -196,7 +206,7 @@ export function registerMarkerTools(server: McpServer): void {
         const patch: Json = { pins };
         if (args.makeDefault) patch.defaultPinId = pin.id;
 
-        await writeLayer(client, args.sceneId, layerIndex, patch);
+        await writeLayer(client, args.sceneId, scene, layerIndex, patch);
         return json({
           added: pin,
           isDefault: Boolean(args.makeDefault),
@@ -232,7 +242,7 @@ export function registerMarkerTools(server: McpServer): void {
     safe(async (args) => {
       const client = session.client();
       return withAuthRecovery(async () => {
-        const { layer, layerIndex } = await getLayer(client, args.sceneId);
+        const { scene, layer, layerIndex } = await getLayer(client, args.sceneId);
 
         const teleporter: Marker = {
           id: randomUUID(),
@@ -250,7 +260,7 @@ export function registerMarkerTools(server: McpServer): void {
         };
 
         const teleporters = [...markersOn(layer, "teleporters"), teleporter];
-        await writeLayer(client, args.sceneId, layerIndex, { teleporters });
+        await writeLayer(client, args.sceneId, scene, layerIndex, { teleporters });
         return json({
           added: teleporter,
           ...(args.linkTo ? {} : { note: "No destination set — link it to another teleporter's id to make it work." }),
@@ -284,7 +294,7 @@ export function registerMarkerTools(server: McpServer): void {
     safe(async (args) => {
       const client = session.client();
       return withAuthRecovery(async () => {
-        const { layer, layerIndex } = await getLayer(client, args.sceneId);
+        const { scene, layer, layerIndex } = await getLayer(client, args.sceneId);
 
         const block: Json = {
           id: randomUUID(),
@@ -296,7 +306,7 @@ export function registerMarkerTools(server: McpServer): void {
         };
 
         const textBlocks = [...markersOn(layer, "textBlocks"), block as Marker];
-        await writeLayer(client, args.sceneId, layerIndex, { textBlocks });
+        await writeLayer(client, args.sceneId, scene, layerIndex, { textBlocks });
         return json({ added: block });
       });
     }),
@@ -320,7 +330,7 @@ export function registerMarkerTools(server: McpServer): void {
       requireConfirm(args.confirm, `remove ${args.kind} marker ${args.id}`);
       const client = session.client();
       return withAuthRecovery(async () => {
-        const { layer, layerIndex } = await getLayer(client, args.sceneId);
+        const { scene, layer, layerIndex } = await getLayer(client, args.sceneId);
         const before = markersOn(layer, args.kind);
         const after = before.filter((m) => m.id !== args.id);
 
@@ -332,7 +342,7 @@ export function registerMarkerTools(server: McpServer): void {
         // A dangling defaultPinId leaves the camera with nowhere to open.
         if (args.kind === "pins" && layer.defaultPinId === args.id) patch.defaultPinId = null;
 
-        await writeLayer(client, args.sceneId, layerIndex, patch);
+        await writeLayer(client, args.sceneId, scene, layerIndex, patch);
         return text(`Removed ${args.kind} marker ${args.id}.`);
       });
     }),

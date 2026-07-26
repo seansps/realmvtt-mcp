@@ -8,11 +8,12 @@
  * tool descriptions AND in the `3d-scene-authoring` guide, because getting them
  * wrong produces a scene that looks plausible in JSON and broken in the renderer.
  */
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Json, Query, RealmClient } from "../api/client.js";
+import { authStore } from "../auth/store.js";
 import { session, withAuthRecovery } from "../context.js";
 import {
   cavePathAssetsFrom,
@@ -672,6 +673,117 @@ export function registerScene3dTools(server: McpServer): void {
           record: { id: args.recordId, name: record.name },
           model3D: token.model3D,
         });
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_upload_3d_model",
+    {
+      title: "Upload a custom 3D model as a placeable asset",
+      description:
+        "Upload your own GLB and register it as a placeable asset, returning an `assetId` that " +
+        "`realm_place_objects` accepts exactly like a catalog one. Use this for bespoke scenery " +
+        "the shared catalog doesn't have.\n\n" +
+        "The asset is OWNER-SCOPED — yours to place, and it still renders for others in a scene " +
+        "you share. Storage quota and asset tracking are handled by the server as part of the " +
+        "upload.\n\n" +
+        "SCALE MATTERS: 1 GLB unit should be 1 grid cube (5 ft). If the model was authored in " +
+        "METRES, pass baseScale 0.66 (= 1/1.524); a millimetre export needs ~0.00066. Get this " +
+        "wrong and the model arrives microscopic or enormous. `realm_guide` topic `3d-assets` " +
+        "covers the scale, orientation and pivot conventions — models should face −Z with their " +
+        "base at y=0.",
+      inputSchema: {
+        path: z.string().describe("Absolute path to the .glb file on this machine."),
+        name: z.string().describe("Display name for the asset."),
+        role: z
+          .enum(["prop", "wall", "door", "window"])
+          .optional()
+          .describe(
+            "What it behaves as. `prop` (default) is free-placed decor; `wall`/`door`/`window` " +
+              "get the same edge-snapping and portal behaviour as built-in structure pieces.",
+          ),
+        placementType: z
+          .enum(["free", "wall"])
+          .optional()
+          .describe("`wall` makes it wall-mounted decor that snaps to a wall face. Default `free`."),
+        baseScale: z
+          .number()
+          .optional()
+          .describe("Natural size multiplier. 1 = authored in grid cubes; 0.66 = authored in metres."),
+        modelRotation: z
+          .object({ x: z.number(), y: z.number(), z: z.number() })
+          .optional()
+          .describe("Baked orientation correction in DEGREES, for a model authored facing wrong."),
+        hingeSide: z.enum(["left", "right"]).optional().describe("Door leaf pivot edge."),
+      },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      if (!/\.glb$/i.test(args.path)) {
+        return text("Only .glb files can be uploaded as 3D models. Export your model to GLB first.");
+      }
+
+      const data = await readFile(args.path);
+      return withAuthRecovery(async () => {
+        // X-Asset-Kind routes the file to the public `3d/user/` prefix, so a scene
+        // using it renders for other people without a rehydrate step.
+        const stored = await client.upload(basename(args.path), new Uint8Array(data), "model-3d");
+        const modelPath = stored.replace(/^\//, "");
+
+        const asset = await client.create<Json>("/custom-assets-3d", {
+          name: args.name,
+          kind: "prop", // the stored kind is always prop; `role` drives behaviour
+          role: args.role ?? "prop",
+          placementType: args.placementType ?? "free",
+          modelPath,
+          ...(args.baseScale !== undefined ? { baseScale: args.baseScale } : {}),
+          ...(args.modelRotation ? { modelRotation: args.modelRotation } : {}),
+          ...(args.hingeSide ? { hingeSide: args.hingeSide } : {}),
+        });
+
+        return json({
+          assetId: asset.assetId,
+          name: asset.name,
+          modelPath,
+          sizeBytes: data.length,
+          usage:
+            `Place it with realm_place_objects using assetId "${asset.assetId}" — same as any ` +
+            `catalog asset. Check the scale in-app; adjust by re-uploading with a different ` +
+            `baseScale, or per-placement with \`scale\`.`,
+        });
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_list_3d_models",
+    {
+      title: "List your custom 3D models",
+      description:
+        "List the custom 3D assets you've uploaded, with the assetIds `realm_place_objects` " +
+        "accepts. These are separate from the shared catalog that `realm_search_3d_assets` covers.",
+      inputSchema: { search: z.string().optional().describe("Filter by name.") },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      const me = authStore.read()?.user?._id;
+      return withAuthRecovery(async () => {
+        const rows = await client.findAll<Json>(
+          "/custom-assets-3d",
+          me ? { ownerId: me } : {},
+        );
+        const needle = args.search?.toLowerCase();
+        const models = rows
+          .filter((r) => !needle || String(r.name ?? "").toLowerCase().includes(needle))
+          .map((r) => ({
+            assetId: r.assetId,
+            name: r.name,
+            role: r.role,
+            placementType: r.placementType,
+            baseScale: r.baseScale,
+          }));
+        return json({ total: models.length, models });
       });
     }),
   );
