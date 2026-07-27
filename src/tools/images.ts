@@ -31,7 +31,7 @@ export function cdnUrl(storedPath: string): string {
 }
 
 /**
- * The `<img>` markup a journal page uses, matching what the Fantasy Grounds
+ * The `<img>` markup a journal page uses, matching what the bulk journal
  * importer produces. `id` carries the image RECORD id so the app can trace the
  * embed back to the library entry; `data-display`/`data-float` drive layout.
  */

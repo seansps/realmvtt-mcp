@@ -99,6 +99,12 @@ page content, so fetch a page by id to read its HTML.
 **Journal page content is an HTML string.** Not markdown, not a document model.
 `<h1>`, `<p>`, `<ul><li>`, `<table>` all work.
 
+**Links to campaign content are a custom tag.** `<record-link recordlink='{…}'>`
+carries the whole link as JSON in the attribute; build it with
+`realm_journal_record_link_html` rather than by hand. A `scenes` link is the way to
+send the table to a map from inside the prose — clicking it asks the GM to view or
+activate that scene.
+
 **Rulesets are big.** `realm_get_ruleset` writes to a file rather than returning
 megabytes of tab HTML and roll-handler JavaScript inline. Reads are unminified, so
 edit-and-upload round trips preserve the source.

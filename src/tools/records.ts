@@ -52,6 +52,7 @@ const recordTypeArg = z.string().describe(RECORD_TYPE_GUIDE);
  *  type (items, spells, …), which is then narrowed by `recordType` on the link. */
 export const LINK_TYPES = [
   "tables",
+  "scenes",
   "npcs",
   "characters",
   "records",
@@ -82,7 +83,11 @@ export interface CellLinkInput {
 export function buildRecordLink(link: CellLinkInput): Json {
   const value: Json = { _id: link.id, name: link.name };
   if (link.type === "records" && link.recordType) value.recordType = link.recordType;
-  return { type: link.type, tooltip: link.name, value };
+  const built: Json = { type: link.type, tooltip: link.name, value };
+  // Scenes render with the Scenes panel's map glyph, the same default the app
+  // applies when it sanitizes a dragged scene.
+  if (link.type === "scenes") built.icon = "IconMap";
+  return built;
 }
 
 /** An effect rule type declared by a ruleset (`ruleset.effects[]`). */
@@ -122,7 +127,10 @@ With \`realm_write_table\`, give the cell a \`link\`:
   { text: "A snarling wolf", link: { type: "npcs", id: "<npcId>", name: "Wolf" } }
 
 \`type\` names the service the target lives in:
-  tables · npcs · characters · records · journals · encounters · effects · images · sounds · decks
+  tables · scenes · npcs · characters · records · journals · encounters · effects · images · sounds · decks
+
+A \`scenes\` link sends the table to a map: rolling it hands the GM a link that asks
+whether to view or activate that scene.
 
 For anything the RULESET defines (items, spells, feats, …) use type "records" and add
 \`recordType\`, because those all share one service:
