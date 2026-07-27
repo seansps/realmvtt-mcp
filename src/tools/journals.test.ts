@@ -106,3 +106,153 @@ describe("journalRecordLinkHtml", () => {
     expect(JOURNAL_LINK_TYPES).toContain("scenes");
   });
 });
+
+/**
+ * Payloads lifted verbatim out of a real journal page, so the generator is
+ * pinned to what the app itself writes rather than to our reading of it.
+ */
+describe("journalRecordLinkHtml — matches links stored by the app", () => {
+  it("reproduces a stored scene link exactly", () => {
+    const html = journalRecordLinkHtml({
+      type: "scenes",
+      id: "68e12e4fcbb1e209a47d5f68",
+      name: "10testiso",
+      record: { _id: "68e12e4fcbb1e209a47d5f68", name: "10testiso" },
+    });
+    expect(html).toBe(
+      '<record-link recordlink="{&quot;type&quot;:&quot;scenes&quot;,&quot;tooltip&quot;:&quot;10testiso&quot;,' +
+        "&quot;icon&quot;:&quot;IconMap&quot;,&quot;value&quot;:{&quot;_id&quot;:&quot;68e12e4fcbb1e209a47d5f68&quot;," +
+        '&quot;name&quot;:&quot;10testiso&quot;,&quot;icon&quot;:&quot;IconMap&quot;}}"></record-link>',
+    );
+  });
+
+  it("reproduces a stored ruleset-record link, icon at both levels", () => {
+    const payload = payloadOf(
+      journalRecordLinkHtml({
+        type: "records",
+        id: "6a065052e4f7dd62e79d75a9",
+        name: "Dagger",
+        recordType: "items",
+        record: { _id: "6a065052e4f7dd62e79d75a9", name: "Dagger", recordType: "items", icon: "IconMoneybag" },
+      }),
+    );
+    expect(payload).toEqual({
+      type: "records",
+      tooltip: "Dagger",
+      icon: "IconMoneybag",
+      value: {
+        _id: "6a065052e4f7dd62e79d75a9",
+        name: "Dagger",
+        recordType: "items",
+        icon: "IconMoneybag",
+      },
+    });
+  });
+
+  it("carries the token and size an NPC link needs to be dropped on the map", () => {
+    const payload = payloadOf(
+      journalRecordLinkHtml({
+        type: "npcs",
+        id: "6a03388112bef02703fed11f",
+        name: "Camel",
+        record: {
+          _id: "6a03388112bef02703fed11f",
+          name: "Camel",
+          recordType: "npcs",
+          // A real NPC document carries far more than this; only these survive.
+          data: { size: "large", hp: 15, statblock: "…" },
+          token: { imageUrl: "/images/50b1a49d_token-Camel.webp", scaleX: 1, scaleY: 1 },
+        },
+      }),
+    );
+    expect(payload.value).toEqual({
+      _id: "6a03388112bef02703fed11f",
+      name: "Camel",
+      recordType: "npcs",
+      data: { size: "large" },
+      token: { imageUrl: "/images/50b1a49d_token-Camel.webp", scaleX: 1, scaleY: 1 },
+    });
+  });
+
+  it("keeps the rest of a record out of the link", () => {
+    const payload = payloadOf(
+      journalRecordLinkHtml({
+        type: "npcs",
+        id: "n1",
+        name: "Camel",
+        record: {
+          _id: "n1",
+          name: "Camel",
+          recordType: "npcs",
+          data: { size: "large", hp: 15, description: "x".repeat(5000) },
+          campaignId: "c1",
+          owner: "u1",
+          effectIds: ["e1"],
+        },
+      }),
+    );
+    // The whole point of the sanitized shape: a link never embeds a record.
+    expect(payload.value.data).toEqual({ size: "large" });
+    expect(payload.value.campaignId).toBeUndefined();
+    expect(payload.value.owner).toBeUndefined();
+    expect(payload.value.effectIds).toBeUndefined();
+  });
+
+  it("reproduces a stored journal link — id and name only", () => {
+    const payload = payloadOf(
+      journalRecordLinkHtml({
+        type: "journals",
+        id: "69954f7d1bc95ace447efa59",
+        name: "MM",
+        record: { _id: "69954f7d1bc95ace447efa59", name: "MM", campaignId: "c1" },
+      }),
+    );
+    expect(payload).toEqual({
+      type: "journals",
+      tooltip: "MM",
+      value: { _id: "69954f7d1bc95ace447efa59", name: "MM" },
+    });
+  });
+
+  it("reproduces a stored table link — id and name only", () => {
+    const payload = payloadOf(
+      journalRecordLinkHtml({
+        type: "tables",
+        id: "681e2de2b9a36b3d4b5838fa",
+        name: "Test Export with Links",
+        record: { _id: "681e2de2b9a36b3d4b5838fa", name: "Test Export with Links", rows: [1, 2, 3] },
+      }),
+    );
+    expect(payload).toEqual({
+      type: "tables",
+      tooltip: "Test Export with Links",
+      value: { _id: "681e2de2b9a36b3d4b5838fa", name: "Test Export with Links" },
+    });
+  });
+
+  it("does not stamp a recordType onto types that never carry one", () => {
+    // Stored scene and table links have no recordType, even though the
+    // documents behind them may.
+    const scene = payloadOf(
+      journalRecordLinkHtml({
+        type: "scenes",
+        id: "s1",
+        name: "Docks",
+        record: { _id: "s1", name: "Docks", recordType: "scenes" },
+      }),
+    );
+    expect(scene.value.recordType).toBeUndefined();
+  });
+
+  it("defaults a token's scale, which older records omit", () => {
+    const payload = payloadOf(
+      journalRecordLinkHtml({
+        type: "npcs",
+        id: "n1",
+        name: "Dragon",
+        record: { _id: "n1", name: "Dragon", token: { imageUrl: "/images/d.webp" } },
+      }),
+    );
+    expect(payload.value.token).toEqual({ imageUrl: "/images/d.webp", scaleX: 1, scaleY: 1 });
+  });
+});

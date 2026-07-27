@@ -41,6 +41,38 @@ export interface JournalLinkInput {
   recordType?: string;
   /** Journals only: clicking the link opens this page. */
   pageNumber?: number;
+  /** The resolved document, if we have it — see `enrichLinkValue`. */
+  record?: Json;
+}
+
+/** Services whose links carry a `recordType` inside `value`. */
+const TYPED_LINKS = new Set<JournalLinkType>(["records", "npcs", "characters"]);
+
+/**
+ * Copy across the extra fields a dragged link carries, exactly the set
+ * `sanitizeRecordLink` keeps — no more, since the point of the sanitizer is that
+ * a link never embeds a whole record.
+ *
+ * These are not decoration. `token.imageUrl` and `data.size` are what let an NPC
+ * chip be dragged out of the page and dropped onto the map as a correctly-sized
+ * token; without them the drop falls back to a letter token. `portrait` and
+ * `icon` are what stop the chip rendering as a bare generic link.
+ */
+function enrichLinkValue(value: Json, type: JournalLinkType, record: Json): void {
+  const data = record.data as Json | undefined;
+  const token = record.token as Json | undefined;
+
+  if (TYPED_LINKS.has(type) && record.recordType) value.recordType = record.recordType;
+  if (record.icon) value.icon = record.icon;
+  if (record.portrait) value.portrait = record.portrait;
+  if (data?.size) value.data = { size: data.size };
+  if (token?.imageUrl) {
+    value.token = {
+      imageUrl: token.imageUrl,
+      scaleX: token.scaleX ?? 1,
+      scaleY: token.scaleY ?? 1,
+    };
+  }
 }
 
 /** HTML-attribute escaping, matching the bulk journal importer's. */
@@ -65,20 +97,24 @@ function escapeAttr(text: string): string {
  * unescaped, a name containing `&` plus letters is decoded as an entity by the
  * HTML parser and the JSON no longer parses.
  *
- * Scenes carry `IconMap` at both levels, as the importer does for its icons:
- * the chip renders the top-level `icon`, and `value.icon` is what survives if
- * the link is re-sanitized after a drag.
+ * An icon appears at BOTH levels, as it does in stored pages: the chip renders
+ * the top-level `icon`, and `value.icon` is what survives if the link is dragged
+ * back out and re-sanitized. Scenes always get `IconMap`.
+ *
+ * Key order matches stored pages too (type, tooltip, icon, value) — irrelevant
+ * to any parser, but it keeps a generated page diffable against a hand-made one.
  */
 export function journalRecordLinkHtml(link: JournalLinkInput): string {
   const value: Json = { _id: link.id, name: link.name };
-  if (link.type === "records" && link.recordType) value.recordType = link.recordType;
+  if (link.record) enrichLinkValue(value, link.type, link.record);
+  // An explicit recordType wins: it is how the caller narrows /records.
+  if (TYPED_LINKS.has(link.type) && link.recordType) value.recordType = link.recordType;
   if (link.type === "journals" && link.pageNumber) value.pageNumber = link.pageNumber;
+  if (link.type === "scenes") value.icon = "IconMap";
 
-  const payload: Json = { type: link.type, tooltip: link.name, value };
-  if (link.type === "scenes") {
-    payload.icon = "IconMap";
-    value.icon = "IconMap";
-  }
+  const payload: Json = { type: link.type, tooltip: link.name };
+  if (value.icon) payload.icon = value.icon;
+  payload.value = value;
 
   return `<record-link recordlink="${escapeAttr(JSON.stringify(payload))}"></record-link>`;
 }
@@ -285,6 +321,7 @@ export function registerJournalTools(server: McpServer): void {
           type: args.type,
           id: String(resolved._id),
           name: args.label ?? String(resolved.name ?? args.target),
+          record: resolved,
           ...(args.recordType ? { recordType: args.recordType } : {}),
           ...(args.pageNumber ? { pageNumber: args.pageNumber } : {}),
         });
