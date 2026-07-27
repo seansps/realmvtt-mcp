@@ -18,6 +18,7 @@ import { basename, extname, isAbsolute, resolve as resolvePath } from "node:path
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Json, RealmClient } from "../api/client.js";
+import { authStore } from "../auth/store.js";
 import { session, withAuthRecovery } from "../context.js";
 import { campaignArg, json, safe, text } from "./registry.js";
 
@@ -405,8 +406,15 @@ export function registerImageTools(server: McpServer): void {
 
         const patch: Json = { portrait: resolved.path };
         if (args.asToken) {
-          const existing = await client.get<Json>(path, args.recordId);
-          patch.token = { ...((existing.token as Json) ?? {}), imageUrl: resolved.path };
+          const record = await client.get<Json>(path, args.recordId);
+          const existingToken = (record.token as Json) ?? {};
+          // `creatorId` is required by the token schema, so a record that has never
+          // had a token needs one supplied or the patch fails validation.
+          patch.token = {
+            ...existingToken,
+            creatorId: existingToken.creatorId ?? authStore.read()?.user?._id ?? "",
+            imageUrl: resolved.path,
+          };
         }
 
         const updated = await client.patch<Json>(path, args.recordId, patch);

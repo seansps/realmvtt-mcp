@@ -5,6 +5,8 @@ import {
   WALL_HEIGHT,
   backedOntoWall,
   compactAsset,
+  customToModel3D,
+  isCustomAssetId,
   mountOnWall,
   resolveRot,
   rotFacing,
@@ -347,5 +349,56 @@ describe("resolveRot with wall references", () => {
 
   it("rejects a wall reference missing its edge rot", () => {
     expect(() => resolveRot({ assetId: "t", onWall: { x: 1, y: 1 } })).toThrow(/x, y, rot/);
+  });
+});
+
+/**
+ * A custom upload is as valid a mini as a catalog one — `model3D.url` is just a CDN
+ * path, and `/3d/user/…` is documented alongside `/3d/tokens/…`. Looking only in
+ * the catalog meant six uploaded character models couldn't be assigned to anything.
+ */
+describe("custom models as tokens", () => {
+  const press: Parameters<typeof customToModel3D>[0] = {
+    assetId: "cust-5c198ec2-d781-4233-9950-b2b926713c36",
+    name: "Printing Press",
+    modelPath: "3d/user/abc_press.glb",
+  };
+
+  it("recognises a custom assetId", () => {
+    expect(isCustomAssetId("cust-5c198ec2-d781-4233-9950-b2b926713c36")).toBe(true);
+    expect(isCustomAssetId("goblin-warrior")).toBe(false);
+  });
+
+  it("builds a model3D from an uploaded asset, slash-normalised", () => {
+    expect(customToModel3D(press).url).toBe("/3d/user/abc_press.glb");
+  });
+
+  it("puts a pedestal under a custom model by default — most GLBs have no base", () => {
+    expect(customToModel3D(press).usePedestal).toBe(true);
+  });
+
+  it("allows the pedestal to be turned off for a model that ships its own", () => {
+    expect(customToModel3D(press, false).usePedestal).toBe(false);
+  });
+
+  it("carries the upload's scale across", () => {
+    expect(customToModel3D({ ...press, baseScale: 0.66 }).baseScale).toBe(0.66);
+  });
+
+  it("maps a yaw correction to frontFaceDeg", () => {
+    const m = customToModel3D({ ...press, modelRotation: { x: 0, y: 180, z: 0 } });
+    expect(m.frontFaceDeg).toBe(180);
+  });
+
+  it("does not claim catalog provenance for a custom model", () => {
+    // catalogId means "picked from the Realm catalog"; a cust- id there would send
+    // the app's picker looking for an entry that doesn't exist.
+    expect(customToModel3D(press)).not.toHaveProperty("catalogId");
+  });
+
+  it("still records provenance for a real catalog mini", () => {
+    expect(toModel3D({ assetId: "goblin", name: "Goblin", modelPath: "a.glb" }).catalogId).toBe(
+      "goblin",
+    );
   });
 });

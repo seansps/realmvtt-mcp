@@ -134,6 +134,46 @@ export interface CatalogToken extends Json {
  * some arbitrary size. `url` is normalised to a LEADING SLASH — the catalog stores
  * `modelPath` without one and the renderer expects it.
  */
+/** A user-uploaded model from `custom-assets-3d`. */
+export interface CustomAsset3D extends Json {
+  assetId: string;
+  name: string;
+  modelPath: string;
+  baseScale?: number;
+  modelRotation?: { x: number; y: number; z: number };
+}
+
+/** Custom assets are minted as `cust-<uuid>`; catalog ones never look like that. */
+export function isCustomAssetId(assetId: string): boolean {
+  return /^cust-/i.test(assetId);
+}
+
+/**
+ * A user-uploaded GLB → the `token.model3D` a record stores.
+ *
+ * `model3D.url` is just a CDN path, and `/3d/user/…` (a custom upload) is as valid
+ * there as `/3d/tokens/…` (the Realm catalog) — so an uploaded model can be a
+ * creature's mini, not only scenery.
+ *
+ * `catalogId` is deliberately NOT set: it means "picked from the Realm token
+ * catalog", and pointing it at a `cust-` id would send the app's picker looking in
+ * a catalog that has no such entry.
+ */
+export function customToModel3D(a: CustomAsset3D, usePedestal = true): Json {
+  return {
+    url: a.modelPath.startsWith("/") ? a.modelPath : `/${a.modelPath}`,
+    ...(a.baseScale != null ? { baseScale: a.baseScale } : {}),
+    // A token's only orientation correction is YAW. A custom asset's pitch/roll
+    // (x/z) have no token equivalent — those need baking into the GLB.
+    ...(a.modelRotation?.y ? { frontFaceDeg: a.modelRotation.y } : {}),
+    // Set EXPLICITLY rather than left to the default. Custom GLBs are usually a
+    // bare figure with no base of their own, so a pedestal is what makes it read
+    // as a token on the table — and being explicit lets it be turned off for the
+    // occasional model that ships its own.
+    usePedestal,
+  };
+}
+
 export function toModel3D(t: CatalogToken): Json {
   return {
     url: t.modelPath.startsWith("/") ? t.modelPath : `/${t.modelPath}`,
@@ -624,9 +664,10 @@ export function registerScene3dTools(server: McpServer): void {
     {
       title: "Give a record a 3D token (mini)",
       description:
-        "Set the 3D model an NPC or character uses on 3D scenes, from the token catalog. Pass the " +
-        "`assetId` from `realm_search_3d_tokens`; the catalog's scale, pedestal and facing " +
-        "defaults are carried over automatically.\n\n" +
+        "Set the 3D model an NPC or character uses on 3D scenes. Accepts an `assetId` from " +
+        "EITHER source: the shared mini catalog (`realm_search_3d_tokens`) or one of your own " +
+        "uploads (`realm_upload_3d_model` / `realm_list_3d_models`, ids beginning `cust-`). " +
+        "Whichever it is, the model's scale and facing defaults come across automatically.\n\n" +
         "This is the record's 3D representation and is separate from its 2D token image — both " +
         "can be set, and the right one is used per scene type. Pass `clear: true` to remove the " +
         "3D model and fall back to the flat token.",
@@ -636,7 +677,49 @@ export function registerScene3dTools(server: McpServer): void {
           .enum(["npcs", "characters", "records"])
           .optional()
           .describe("Which endpoint the record lives on. Default `npcs`."),
-        assetId: z.string().optional().describe("Catalog token assetId to apply."),
+        assetId: z
+          .string()
+          .optional()
+          .describe("Model to apply — a catalog mini's assetId, or a `cust-` id from your uploads."),
+        usePedestal: z
+          .boolean()
+          .optional()
+          .describe(
+            "Render the standard token base under the model. Defaults to TRUE for your own " +
+              "uploads, since most GLBs are a bare figure with no base; turn it off for a model " +
+              "that ships its own. Catalog minis keep their own setting.",
+          ),
+        baseScale: z
+          .number()
+          .optional()
+          .describe(
+            "Size multiplier on top of creature-size scaling. 1 = the model is already sized in " +
+              "grid cubes. Raise or lower it if the mini reads too small or too large next to others.",
+          ),
+        frontFaceDeg: z
+          .number()
+          .optional()
+          .describe(
+            "FACING correction in degrees, so the model's front points along 0-rotation (−Z / " +
+              "north). A mini that faces backwards on the table needs 180; one facing sideways " +
+              "needs 90 or 270. This is the model's own baked correction — the token's in-scene " +
+              "rotation is separate and set per placement.",
+          ),
+        offsetX: z
+          .number()
+          .optional()
+          .describe("Nudge left/right in cube units, to centre a model that sits off its base."),
+        offsetZ: z
+          .number()
+          .optional()
+          .describe("Nudge forward (−) / back (+) in cube units."),
+        offsetY: z
+          .number()
+          .optional()
+          .describe(
+            "Raise (+) or lower (−) in cube units. Use this when a model floats above its " +
+              "pedestal or sinks into it — the usual fix for a GLB whose origin isn't at its feet.",
+          ),
         clear: z.boolean().optional().describe("Remove the 3D model instead of setting one."),
       },
     },
@@ -651,7 +734,14 @@ export function registerScene3dTools(server: McpServer): void {
         const { path } = client.recordEndpoint(type);
         const record = await client.get<Json>(path, args.recordId);
         // The 2D token settings live alongside model3D and must survive the patch.
-        const token = { ...((record.token as Json) ?? {}) };
+        // `creatorId` is REQUIRED by the token schema, so a record that has never had
+        // a token needs one supplied — patching `{ token: { model3D } }` alone is
+        // rejected by validation, which reads as "the schema won't allow model3D".
+        const existing = (record.token as Json) ?? {};
+        const token: Json = {
+          ...existing,
+          creatorId: existing.creatorId ?? authStore.read()?.user?._id ?? "",
+        };
 
         if (args.clear) {
           delete token.model3D;
@@ -659,19 +749,54 @@ export function registerScene3dTools(server: McpServer): void {
           return text(`Removed the 3D token from ${record.name ?? args.recordId}.`);
         }
 
-        const matches = await client.findAll<CatalogToken>("/tokens-3d", { assetId: args.assetId! });
-        const catalogToken = matches[0];
-        if (!catalogToken) {
-          return text(
-            `No 3D token with assetId "${args.assetId}". Search for one with \`realm_search_3d_tokens\`.`,
-          );
+        const assetId = args.assetId!;
+        let source: string;
+
+        if (isCustomAssetId(assetId)) {
+          const owned = await client.findAll<CustomAsset3D>("/custom-assets-3d", { assetId });
+          const custom = owned[0];
+          if (!custom) {
+            return text(
+              `No uploaded 3D model with assetId "${assetId}". List yours with \`realm_list_3d_models\`.`,
+            );
+          }
+          token.model3D = customToModel3D(custom, args.usePedestal ?? true);
+          source = "your uploads";
+        } else {
+          const matches = await client.findAll<CatalogToken>("/tokens-3d", { assetId });
+          const catalogToken = matches[0];
+          if (!catalogToken) {
+            return text(
+              `No 3D model with assetId "${assetId}" in either source. Search the shared minis ` +
+                `with \`realm_search_3d_tokens\`, or list your uploads with \`realm_list_3d_models\` ` +
+                `(their ids begin \`cust-\`).`,
+            );
+          }
+          token.model3D = toModel3D(catalogToken);
+          // An explicit choice still wins over the catalog's own default.
+          if (args.usePedestal !== undefined) {
+            (token.model3D as Json).usePedestal = args.usePedestal;
+          }
+          source = "the mini catalog";
         }
 
-        token.model3D = toModel3D(catalogToken);
+        // Explicit overrides win over whatever the asset carried. These are the
+        // knobs that make a model actually sit right on the table, so they're
+        // adjustable without re-uploading.
+        const model = token.model3D as Json;
+        for (const key of ["baseScale", "frontFaceDeg", "offsetX", "offsetZ", "offsetY"] as const) {
+          if (args[key] !== undefined) model[key] = args[key];
+        }
+
         await client.patch(path, args.recordId, { token });
         return json({
           record: { id: args.recordId, name: record.name },
-          model3D: token.model3D,
+          from: source,
+          model3D: model,
+          tip:
+            "If it sits wrong in-scene: `frontFaceDeg` turns it (180 = facing backwards), " +
+            "`offsetY` raises or sinks it on the pedestal, `baseScale` resizes it. Re-run with " +
+            "those rather than re-uploading.",
         });
       });
     }),

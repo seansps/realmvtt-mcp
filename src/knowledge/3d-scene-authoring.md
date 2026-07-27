@@ -415,6 +415,25 @@ The conventions in `realm_guide` topic `3d-assets` apply — most importantly:
 - `role: "wall" | "door" | "window"` makes a custom model behave like a structure
   piece — edge snapping, portals — instead of free-placed decor.
 
+### An uploaded model as a creature MINI
+
+`realm_set_3d_token` takes a `cust-` id just as readily as a catalog one — a
+`model3D.url` of `/3d/user/…` is as valid as `/3d/tokens/…`. So a character model
+you uploaded can be assigned to an NPC or PC directly.
+
+Four settings decide whether it actually sits right on the table, and all four are
+adjustable **without re-uploading**:
+
+| | |
+|---|---|
+| `usePedestal` | the standard token base. **On by default** for uploads — most GLBs are a bare figure with nothing under them. Turn it off only for a model that ships its own base. |
+| `frontFaceDeg` | FACING. The model's front must point along 0-rotation (−Z / north). A mini facing backwards on the table needs `180`; sideways needs `90` or `270`. This is the model's baked correction — separate from the token's in-scene rotation, which is per placement. |
+| `offsetY` | raise (+) / lower (−). The fix when a model floats above its pedestal or sinks into it, which happens whenever the GLB's origin isn't at its feet. |
+| `offsetX` / `offsetZ` | left-right and forward-back nudges, to centre a model that sits off its base. |
+
+Offsets are in cube units, so `0.1` is half a foot. Get the model in, look at it,
+then adjust — that's faster than guessing from the GLB.
+
 ## 12. Pin what you build
 
 A scene opens at its default framing. Build a map at (40, 25) and the GM arrives
