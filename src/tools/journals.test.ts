@@ -244,6 +244,49 @@ describe("journalRecordLinkHtml — matches links stored by the app", () => {
     expect(scene.value.recordType).toBeUndefined();
   });
 
+  it("never invents an icon for a per-ruleset type", () => {
+    // Every type but `scenes` gets its icon from the ruleset's record-type
+    // definition, which varies per campaign. A record with no icon of its own
+    // gets no icon here — the app resolves it at render time.
+    for (const type of ["npcs", "records", "tables", "journals", "encounters"] as const) {
+      const payload = payloadOf(
+        journalRecordLinkHtml({
+          type,
+          id: "x1",
+          name: "Thing",
+          record: { _id: "x1", name: "Thing", recordType: "items" },
+        }),
+      );
+      expect(payload.icon, type).toBeUndefined();
+      expect(payload.value.icon, type).toBeUndefined();
+    }
+  });
+
+  it("uses a caller-supplied icon, which is the only way a ruleset icon gets in", () => {
+    const payload = payloadOf(
+      journalRecordLinkHtml({
+        type: "records",
+        id: "r1",
+        name: "Longsword",
+        recordType: "items",
+        icon: "IconSword",
+        record: { _id: "r1", name: "Longsword", recordType: "items" },
+      }),
+    );
+    expect(payload.icon).toBe("IconSword");
+    expect(payload.value.icon).toBe("IconSword");
+  });
+
+  it("keeps scenes on IconMap even if the caller supplies another icon", () => {
+    // The scene glyph is fixed across every campaign; there is no ruleset
+    // record type behind it to disagree.
+    const payload = payloadOf(
+      journalRecordLinkHtml({ type: "scenes", id: "s1", name: "Docks", icon: "IconSword" }),
+    );
+    expect(payload.icon).toBe("IconMap");
+    expect(payload.value.icon).toBe("IconMap");
+  });
+
   it("defaults a token's scale, which older records omit", () => {
     const payload = payloadOf(
       journalRecordLinkHtml({

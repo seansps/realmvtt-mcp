@@ -41,6 +41,11 @@ export interface JournalLinkInput {
   recordType?: string;
   /** Journals only: clicking the link opens this page. */
   pageNumber?: number;
+  /**
+   * Chip icon, when the caller genuinely knows it — e.g. read off the ruleset's
+   * record-type definition. Never guessed here; see `enrichLinkValue`.
+   */
+  icon?: string;
   /** The resolved document, if we have it — see `enrichLinkValue`. */
   record?: Json;
 }
@@ -55,8 +60,15 @@ const TYPED_LINKS = new Set<JournalLinkType>(["records", "npcs", "characters"]);
  *
  * These are not decoration. `token.imageUrl` and `data.size` are what let an NPC
  * chip be dragged out of the page and dropped onto the map as a correctly-sized
- * token; without them the drop falls back to a letter token. `portrait` and
- * `icon` are what stop the chip rendering as a bare generic link.
+ * token; without them the drop falls back to a letter token.
+ *
+ * ICONS: only ever what we actually know. `scenes` is the one type whose icon is
+ * fixed across every campaign (`IconMap`, what the Scenes panel puts in its own
+ * drag payload). Every other type's icon is defined per-ruleset on the record
+ * type, so a record that doesn't carry one is left without — the app falls back
+ * to the ruleset's icon at render time anyway. We do NOT keep a record-type →
+ * icon table here: it would be a guess that silently disagrees with whatever
+ * ruleset the campaign is actually on.
  */
 function enrichLinkValue(value: Json, type: JournalLinkType, record: Json): void {
   const data = record.data as Json | undefined;
@@ -97,9 +109,11 @@ function escapeAttr(text: string): string {
  * unescaped, a name containing `&` plus letters is decoded as an entity by the
  * HTML parser and the JSON no longer parses.
  *
- * An icon appears at BOTH levels, as it does in stored pages: the chip renders
- * the top-level `icon`, and `value.icon` is what survives if the link is dragged
- * back out and re-sanitized. Scenes always get `IconMap`.
+ * When there IS an icon it appears at BOTH levels, as it does in stored pages:
+ * the chip renders the top-level `icon`, and `value.icon` is what survives if the
+ * link is dragged back out and re-sanitized. `scenes` is the only type given one
+ * unconditionally — every other icon is per-ruleset, so it comes from the record
+ * or the caller, or not at all.
  *
  * Key order matches stored pages too (type, tooltip, icon, value) — irrelevant
  * to any parser, but it keeps a generated page diffable against a hand-made one.
@@ -110,6 +124,8 @@ export function journalRecordLinkHtml(link: JournalLinkInput): string {
   // An explicit recordType wins: it is how the caller narrows /records.
   if (TYPED_LINKS.has(link.type) && link.recordType) value.recordType = link.recordType;
   if (link.type === "journals" && link.pageNumber) value.pageNumber = link.pageNumber;
+  // A caller-supplied icon beats the record's; scenes are fixed regardless.
+  if (link.icon) value.icon = link.icon;
   if (link.type === "scenes") value.icon = "IconMap";
 
   const payload: Json = { type: link.type, tooltip: link.name };
@@ -303,6 +319,15 @@ export function registerJournalTools(server: McpServer): void {
           .optional()
           .describe("With type `journals`: open this page number (1-based)."),
         label: z.string().optional().describe("Link text. Defaults to the target's name."),
+        icon: z
+          .string()
+          .optional()
+          .describe(
+            "Chip icon, e.g. `IconSword`. Only pass one you actually know — the record's own, " +
+              "or the record type's `icon` from `realm_get_ruleset`. Leave it off otherwise; " +
+              "the app falls back to the ruleset's icon on its own. Ignored for scenes, which " +
+              "are always `IconMap`.",
+          ),
         ...campaignArg,
       },
     },
@@ -322,6 +347,7 @@ export function registerJournalTools(server: McpServer): void {
           id: String(resolved._id),
           name: args.label ?? String(resolved.name ?? args.target),
           record: resolved,
+          ...(args.icon ? { icon: args.icon } : {}),
           ...(args.recordType ? { recordType: args.recordType } : {}),
           ...(args.pageNumber ? { pageNumber: args.pageNumber } : {}),
         });

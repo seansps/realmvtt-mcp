@@ -84,9 +84,13 @@ export function buildRecordLink(link: CellLinkInput): Json {
   const value: Json = { _id: link.id, name: link.name };
   if (link.type === "records" && link.recordType) value.recordType = link.recordType;
   const built: Json = { type: link.type, tooltip: link.name, value };
-  // Scenes render with the Scenes panel's map glyph, the same default the app
-  // applies when it sanitizes a dragged scene.
-  if (link.type === "scenes") built.icon = "IconMap";
+  // `scenes` is the one type with a fixed icon across every campaign — the map
+  // glyph the Scenes panel itself drags. Any other type's icon is defined
+  // per-ruleset, so we leave it off rather than guess and let the app resolve it.
+  if (link.type === "scenes") {
+    built.icon = "IconMap";
+    value.icon = "IconMap";
+  }
   return built;
 }
 
