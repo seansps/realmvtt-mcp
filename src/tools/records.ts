@@ -15,14 +15,16 @@ import { campaignArg, confirmArg, json, requireConfirm, safe, text } from "./reg
 
 /** Trim a record down to something worth putting in front of a model. */
 function summarize(doc: Json): Json {
-  const { _id, name, recordType, category, portrait, shared, locked, moduleId } = doc as {
-    [k: string]: unknown;
-  };
+  const { _id, name, recordType, category, portrait, shared, locked, moduleId, folderId } =
+    doc as {
+      [k: string]: unknown;
+    };
   return {
     id: _id,
     name,
     ...(recordType ? { recordType } : {}),
     ...(category ? { category } : {}),
+    ...(folderId ? { folderId } : {}),
     ...(portrait ? { portrait } : {}),
     ...(shared !== undefined ? { shared } : {}),
     ...(locked ? { locked } : {}),

@@ -18,9 +18,10 @@ import { registerRulesetTools } from "./tools/rulesets.js";
 import { registerScene3dTools } from "./tools/scenes3d.js";
 import { registerMarkerTools } from "./tools/markers.js";
 import { registerTokenTools } from "./tools/tokens.js";
+import { registerFolderTools } from "./tools/folders.js";
 
 export const SERVER_NAME = "realmvtt";
-export const SERVER_VERSION = "0.6.0";
+export const SERVER_VERSION = "0.7.0";
 
 export function createServer(): McpServer {
   const server = new McpServer(
@@ -28,7 +29,7 @@ export function createServer(): McpServer {
     {
       instructions:
         "Tools for a Realm VTT campaign: records (NPCs, items, spells, tables, characters), " +
-        "effects, journals, encounters, rulesets, and 3D scene building.\n\n" +
+        "effects, journals, encounters, rulesets, folders, and 3D scene building.\n\n" +
         "Start with `realm_whoami`. If it reports no session, call `realm_login`. " +
         "Then select a campaign with `realm_use_campaign` before using campaign-scoped tools.",
     },
@@ -42,6 +43,7 @@ export function createServer(): McpServer {
   registerScene3dTools(server);
   registerTokenTools(server);
   registerMarkerTools(server);
+  registerFolderTools(server);
   registerGuideTools(server);
   return server;
 }

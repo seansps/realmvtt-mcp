@@ -4,8 +4,8 @@
 
 **Bring your own AI agent to [Realm VTT](https://www.realmvtt.com).**
 
-Write NPCs, author effects, build roll tables, edit rulesets and construct 3D scenes
-in your campaign — by asking.
+Write NPCs, author effects, build roll tables, edit rulesets, organize your
+campaign into folders and construct 3D scenes — by asking.
 
 </div>
 
@@ -155,6 +155,7 @@ something bespoke — the layout is the agent's to design, not a template's.
 | **Tables** | `realm_write_table` · `realm_table_linking_guide` |
 | **Effects** | `realm_find_effects` · `realm_write_effect` · `realm_delete_effect` · `realm_effect_types` |
 | **Encounters** | `realm_find_encounters` · `realm_write_encounter` · `realm_delete_encounter` |
+| **Folders** | `realm_list_folders` · `realm_write_folder` · `realm_move_to_folder` · `realm_delete_folder` |
 | **Journals** | `realm_find_journals` · `realm_write_journal` · `realm_journal_pages` · `realm_write_journal_page` · `realm_delete_journal_page` |
 | **Images** | `realm_upload_image` · `realm_find_image` · `realm_set_portrait` · `realm_journal_image_html` |
 | **Scenes** | `realm_create_scene` |

@@ -195,6 +195,16 @@ export class RealmClient {
     return this.fetchJson<T>(`${this.baseUrl}${path}/${id}`, { method: "DELETE" });
   }
 
+  /** Remove one document with query modifiers (e.g. /folders' `cascade` flag). */
+  async removeWithQuery<T = Json>(
+    path: string,
+    id: string,
+    query: Record<string, string>,
+  ): Promise<T> {
+    const params = new URLSearchParams(query);
+    return this.fetchJson<T>(`${this.baseUrl}${path}/${id}?${params}`, { method: "DELETE" });
+  }
+
   /** Batch remove by query (services that permit it, e.g. scene-objects-3d). */
   async removeMany<T = Json>(path: string, query: Record<string, string>): Promise<T> {
     const params = new URLSearchParams(query);
