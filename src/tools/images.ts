@@ -21,6 +21,15 @@ import type { Json, RealmClient } from "../api/client.js";
 import { authStore } from "../auth/store.js";
 import { session, withAuthRecovery } from "../context.js";
 import { campaignArg, json, safe, text } from "./registry.js";
+import {
+  fetchPage,
+  pageArgs,
+  pageResult,
+  provenanceOf,
+  tryLoadFolderIndex,
+  withSearch,
+  type FolderIndex,
+} from "./listing.js";
 
 /** Where uploaded assets are served from. Stored paths are relative to this. */
 export const ASSET_CDN = "https://assets.realmvtt.com";
@@ -136,6 +145,25 @@ async function gridDefaults(
   }
 }
 
+/**
+ * One row of the image library.
+ *
+ * `cdnUrl` is included alongside `storedPath` because they are used for different
+ * things and confusing them is a silent failure: a scene layer and a portrait
+ * store the RELATIVE path, while journal `<img>` markup needs the absolute one.
+ */
+export function imageSummary(i: Json, folders: FolderIndex): Json {
+  return {
+    id: i._id,
+    name: i.name,
+    storedPath: i.url,
+    cdnUrl: cdnUrl(String(i.url ?? "")),
+    ...(i.category ? { category: i.category } : {}),
+    ...folders.decorate(i),
+    ...provenanceOf(i),
+  };
+}
+
 /** Resolve an existing image by record id or stored path, for tools that accept either. */
 async function resolveExistingImage(
   client: RealmClient,
@@ -200,32 +228,75 @@ export function registerImageTools(server: McpServer): void {
   );
 
   server.registerTool(
-    "realm_find_image",
+    "realm_list_images",
     {
-      title: "Find a campaign image",
-      description: "Search the campaign's image library by name.",
-      inputSchema: { search: z.string().describe("Name to search for."), ...campaignArg },
+      title: "List the campaign's image library",
+      description:
+        "The campaign's images, with the same paging, folder and provenance fields every other " +
+        "list tool reports. Use it to inventory what a campaign is carrying — before an export, " +
+        "a cleanup, or a reorganize.\n\n" +
+        "Filters (`search`, `category`, `folderId`) narrow it; with none it lists everything, a " +
+        "page at a time.",
+      inputSchema: {
+        search: z.string().optional().describe("Free-text search. Omit to list every image."),
+        category: z.string().optional().describe("Only images in this library category."),
+        folderId: z
+          .string()
+          .optional()
+          .describe("Only images filed in this folder. Pass `root` for unfiled images."),
+        ...pageArgs,
+        ...campaignArg,
+      },
     },
     safe(async (args) => {
       const client = session.client();
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
-        const res = await client.find<Json>("/images", {
-          campaignId,
-          $search: args.search,
-          $limit: 25,
-        });
-        return json({
-          total: res.total,
-          images: res.data.map((i) => ({
-            id: i._id,
-            name: i.name,
-            storedPath: i.url,
-            cdnUrl: cdnUrl(String(i.url)),
-            category: i.category,
-            shared: i.shared,
-          })),
-        });
+        const folders = await tryLoadFolderIndex(client, campaignId, "images");
+
+        // Every filter here IS a field on the image document, so all of them go
+        // into the query and the server does the narrowing — `total` then counts
+        // the filtered set rather than the whole library.
+        const query = withSearch({ campaignId }, args.search);
+        if (args.category) query.category = args.category;
+        if (args.folderId === "root") query.folderId = { $exists: false };
+        else if (args.folderId) query.folderId = args.folderId;
+
+        const page = await fetchPage<Json>(client, "/images", query, args.limit, args.skip);
+        return json(pageResult(page, "images", (i) => imageSummary(i, folders)));
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_find_image",
+    {
+      title: "Find a campaign image",
+      description:
+        "Search the campaign's image library by name. To list the whole library (or filter by " +
+        "folder or category), use `realm_list_images`.",
+      inputSchema: {
+        search: z.string().optional().describe("Name to search for. Omit to list the first page."),
+        ...pageArgs,
+        ...campaignArg,
+      },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      return withAuthRecovery(async () => {
+        const campaignId = await session.resolveCampaignId(client, args.campaign);
+        const folders = await tryLoadFolderIndex(client, campaignId, "images");
+        // `$search` is only sent when there IS one: the backend builds a Mongo stage
+        // from the value and answers 500 on an empty string, which used to make
+        // "just show me the images" impossible to ask for.
+        const page = await fetchPage<Json>(
+          client,
+          "/images",
+          withSearch({ campaignId }, args.search),
+          args.limit ?? 25,
+          args.skip,
+        );
+        return json(pageResult(page, "images", (i) => imageSummary(i, folders)));
       });
     }),
   );

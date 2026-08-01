@@ -3,8 +3,9 @@
  *
  * A typed port of the `realm-api` CLI's RealmVTTClient — same endpoints, same
  * bearer-JWT auth, same quirks. Realm's backend is FeathersJS, which means:
- *   - `find` returns `{ total, limit, skip, data }` and is CLAMPED to 50 rows per
- *     page regardless of `$limit`, so anything that wants a full list has to page.
+ *   - `find` returns `{ total, limit, skip, data }` and PAGINATES BY DEFAULT: 50
+ *     rows when `$limit` is absent, up to `max` when it is present. Anything that
+ *     wants a full list has to page.
  *   - Custom service methods are invoked as a POST carrying an `X-Service-Method`
  *     header (there is no REST verb for them).
  *   - Query fields are whitelisted per service; an unlisted field is a 400, not a
@@ -27,8 +28,21 @@ export interface AuthResult {
   user?: { _id: string; email?: string; displayName?: string; role?: string };
 }
 
-/** The page size the backend actually honours. Config claims 500; the service clamps to 50. */
-const PAGE = 50;
+/**
+ * Rows to ask for per page.
+ *
+ * The backend's `paginate` config is `{ default: 50, max: 500 }` — 50 is what you
+ * get for omitting `$limit`, NOT a ceiling on what you may ask for. Verified
+ * against the API: `$limit=200` on a 171-row library returns all 171, and
+ * `$limit=500` is honoured. A couple of services raise their own ceiling further
+ * (folders 200/1000, scene-objects-3d 500/500); none lowers it.
+ *
+ * This used to be 50 on the belief that the service clamped there, which made
+ * every full listing cost ten times the requests it needed. Paging loops must
+ * still advance by the rows they actually RECEIVED rather than by this constant,
+ * so a service that does cap lower simply costs an extra round trip.
+ */
+const PAGE = 500;
 
 export type Json = Record<string, unknown>;
 

@@ -15,7 +15,7 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { Json, Query } from "../api/client.js";
+import type { Json, Query, RealmClient } from "../api/client.js";
 import { session, withAuthRecovery } from "../context.js";
 import { campaignArg, confirmArg, json, requireConfirm, safe, text } from "./registry.js";
 
@@ -62,6 +62,23 @@ export function folderScopeFor(type: string): FolderScope {
   return { folderType: "records", recordType: t, servicePath: "/records" };
 }
 
+/**
+ * Every item a folder tree files, for counting and for manifest validation.
+ *
+ * Scoped exactly the way the folder is: a dedicated list needs only the campaign,
+ * while the shared /records service must be narrowed by `recordType` or a count of
+ * "spells folders" would tally every item, feat and class in the campaign too.
+ */
+export async function listItemsIn(
+  client: RealmClient,
+  campaignId: string,
+  scope: FolderScope,
+): Promise<Array<Json & { _id: string }>> {
+  const query: Query = { campaignId };
+  if (scope.recordType) query.recordType = scope.recordType;
+  return client.findAll<Json & { _id: string }>(scope.servicePath, query);
+}
+
 const FOLDER_TYPE_GUIDE =
   "Which list this folder tree organizes:\n" +
   `• one of ${DEDICATED_FOLDER_TYPES.join(", ")} — the app's own tabs\n` +
@@ -70,13 +87,84 @@ const FOLDER_TYPE_GUIDE =
 
 const folderTypeArg = z.string().describe(FOLDER_TYPE_GUIDE);
 
-interface FolderDoc {
+export interface FolderDoc {
   _id: string;
   name: string;
   parentId?: string | null;
   color?: string;
   moduleId?: string;
   [k: string]: unknown;
+}
+
+/**
+ * How many items each folder holds, and how many it holds counting its
+ * descendants.
+ *
+ * Both numbers are needed to say anything useful about a folder. `direct: 0` on
+ * its own reads as "empty, delete it" — which is wrong for a folder whose whole
+ * purpose is to hold three subfolders full of monsters. Only `total: 0` means
+ * genuinely empty, and the audit's empty-folder check keys off that.
+ *
+ * Items filed into a folder id that no longer exists are counted under
+ * `orphaned`, because they are invisible in the app: the root listing matches
+ * `folderId` absent, and no folder matches theirs.
+ */
+export interface FolderCounts {
+  direct: Record<string, number>;
+  total: Record<string, number>;
+  orphaned: number;
+  /** Items with no `folderId` at all — the tab's root level. */
+  root: number;
+}
+
+export function countItemsByFolder(
+  folders: FolderDoc[],
+  items: Array<Json>,
+): FolderCounts {
+  const direct = new Map<string, number>();
+  const total = new Map<string, number>();
+  for (const f of folders) {
+    direct.set(String(f._id), 0);
+    total.set(String(f._id), 0);
+  }
+
+  let orphaned = 0;
+  let root = 0;
+  for (const item of items) {
+    if (!item.folderId) {
+      root += 1;
+      continue;
+    }
+    const id = String(item.folderId);
+    if (!direct.has(id)) {
+      orphaned += 1;
+      continue;
+    }
+    direct.set(id, (direct.get(id) ?? 0) + 1);
+  }
+
+  // Roll each folder's own count up through its ancestors. Walking upward per
+  // folder (rather than recursing downward) needs no child index, and the
+  // `seen` guard means corrupt parent cycles cost one pass instead of hanging.
+  const byId = new Map(folders.map((f) => [String(f._id), f]));
+  for (const f of folders) {
+    const own = direct.get(String(f._id)) ?? 0;
+    let cursor: FolderDoc | undefined = f;
+    const seen = new Set<string>();
+    while (cursor && !seen.has(String(cursor._id))) {
+      const id = String(cursor._id);
+      seen.add(id);
+      total.set(id, (total.get(id) ?? 0) + own);
+      cursor = cursor.parentId ? byId.get(String(cursor.parentId)) : undefined;
+    }
+  }
+
+  return {
+    direct: Object.fromEntries(direct),
+    total: Object.fromEntries(total),
+    orphaned,
+    root,
+  };
 }
 
 /**
@@ -113,6 +201,14 @@ export function registerFolderTools(server: McpServer): void {
         "content, and with `parentId` on `realm_write_folder` to nest.",
       inputSchema: {
         type: folderTypeArg,
+        counts: z
+          .boolean()
+          .optional()
+          .describe(
+            "Also report how many items each folder holds (`itemCount` direct, `itemCountDeep` " +
+              "including subfolders). Costs an extra fetch of the whole list, so it is off by " +
+              "default — turn it on when deciding what to prune or reorganize.",
+          ),
         ...campaignArg,
       },
     },
@@ -125,9 +221,17 @@ export function registerFolderTools(server: McpServer): void {
         if (scope.recordType) query.recordType = scope.recordType;
         const folders = await client.findAll<FolderDoc>("/folders", query);
         const paths = folderPathsById(folders);
+
+        const counts = args.counts
+          ? countItemsByFolder(folders, await listItemsIn(client, campaignId, scope))
+          : null;
+
         return json({
           type: args.type,
           total: folders.length,
+          ...(counts
+            ? { unfiled: counts.root, ...(counts.orphaned ? { orphanedItems: counts.orphaned } : {}) }
+            : {}),
           folders: folders.map((f) => ({
             id: f._id,
             name: f.name,
@@ -135,6 +239,12 @@ export function registerFolderTools(server: McpServer): void {
             ...(f.parentId ? { parentId: f.parentId } : {}),
             ...(f.color ? { color: f.color } : {}),
             ...(f.moduleId ? { moduleId: f.moduleId } : {}),
+            ...(counts
+              ? {
+                  itemCount: counts.direct[String(f._id)] ?? 0,
+                  itemCountDeep: counts.total[String(f._id)] ?? 0,
+                }
+              : {}),
           })),
         });
       });

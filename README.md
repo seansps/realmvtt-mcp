@@ -157,7 +157,7 @@ something bespoke — the layout is the agent's to design, not a template's.
 | **Encounters** | `realm_find_encounters` · `realm_write_encounter` · `realm_delete_encounter` |
 | **Folders** | `realm_list_folders` · `realm_write_folder` · `realm_move_to_folder` · `realm_delete_folder` |
 | **Journals** | `realm_find_journals` · `realm_write_journal` · `realm_journal_pages` · `realm_write_journal_page` · `realm_delete_journal_page` |
-| **Images** | `realm_upload_image` · `realm_find_image` · `realm_set_portrait` · `realm_journal_image_html` |
+| **Images** | `realm_upload_image` · `realm_list_images` · `realm_find_image` · `realm_set_portrait` · `realm_journal_image_html` |
 | **Scenes** | `realm_create_scene` |
 | **Rulesets** | `realm_list_rulesets` · `realm_get_ruleset` · `realm_write_ruleset` · `realm_compile_ruleset` |
 | **3D scenes** | `realm_list_scenes` · `realm_get_scene` · `realm_search_3d_assets` · `realm_get_room_kit` · `realm_get_scene_objects` · `realm_place_objects` · `realm_update_object` · `realm_delete_objects` · `realm_clear_scene` |
@@ -165,6 +165,8 @@ something bespoke — the layout is the agent's to design, not a template's.
 | **3D minis** | `realm_search_3d_tokens` · `realm_set_3d_token` |
 | **Creature tokens** | `realm_list_tokens` · `realm_place_tokens` · `realm_move_token` · `realm_delete_tokens` |
 | **Pins, teleports, text** | `realm_list_markers` · `realm_add_pin` · `realm_add_teleporter` · `realm_add_text` · `realm_delete_marker` |
+| **Links & dependencies** | `realm_find_backlinks` · `realm_dependency_graph` · `realm_validate_links` · `realm_replace_link_target` |
+| **Audit & tidying** | `realm_audit_campaign` · `realm_preview_folder_manifest` · `realm_apply_folder_manifest` |
 | **Reference** | `realm_guide` |
 
 Deleting anything requires an explicit confirmation, so nothing is destroyed by a

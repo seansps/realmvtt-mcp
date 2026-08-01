@@ -23,6 +23,15 @@ import {
   offsetRoute,
 } from "../build/cavePath.js";
 import { campaignArg, confirmArg, json, requireConfirm, safe, text } from "./registry.js";
+import {
+  fetchPage,
+  pageArgs,
+  pageResult,
+  provenanceOf,
+  scanPage,
+  tryLoadFolderIndex,
+  withSearch,
+} from "./listing.js";
 
 /**
  * Objects per create request.
@@ -428,7 +437,12 @@ export function registerScene3dTools(server: McpServer): void {
         "`standard`/`canvas` for 2D maps — the 3D tools only apply to `3d` scenes.",
       inputSchema: {
         only3d: z.boolean().optional().describe("Only return 3D scenes."),
-        search: z.string().optional().describe("Filter by name."),
+        search: z.string().optional().describe("Filter by name. Omit to list every scene."),
+        folderId: z
+          .string()
+          .optional()
+          .describe("Only scenes in this folder. Pass `root` for unfiled ones."),
+        ...pageArgs,
         ...campaignArg,
       },
     },
@@ -436,19 +450,38 @@ export function registerScene3dTools(server: McpServer): void {
       const client = session.client();
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
-        const query: Query = { campaignId };
-        if (args.search) query.$search = args.search;
-        const scenes = await client.findAll<Json>("/scenes", query);
-        const rows = scenes
-          .map((s) => ({
+        const folders = await tryLoadFolderIndex(client, campaignId, "scenes");
+
+        const query = withSearch({ campaignId } as Query, args.search);
+        if (args.folderId === "root") query.folderId = { $exists: false };
+        else if (args.folderId) query.folderId = args.folderId;
+
+        // `only3d` is the one filter with no query field behind it: a scene's type
+        // lives on its active LAYER (`sceneTypeOf`), not on the scene document, so
+        // it can only be applied to rows we have already fetched. That makes it a
+        // bounded scan rather than a page, and it says so in the result.
+        const page = args.only3d
+          ? await scanPage<Json>(
+              client,
+              "/scenes",
+              query,
+              (s) => sceneTypeOf(s) === "3d",
+              args.limit,
+              args.skip,
+            )
+          : await fetchPage<Json>(client, "/scenes", query, args.limit, args.skip);
+
+        return json(
+          pageResult(page, "scenes", (s: Json) => ({
             id: s._id,
             name: s.name,
             type: sceneTypeOf(s),
-            active: s.active,
-            category: s.category,
-          }))
-          .filter((s) => !args.only3d || s.type === "3d");
-        return json({ total: scenes.length, returned: rows.length, scenes: rows });
+            ...(s.active ? { active: true } : {}),
+            ...(s.category ? { category: s.category } : {}),
+            ...folders.decorate(s),
+            ...provenanceOf(s),
+          })),
+        );
       });
     }),
   );

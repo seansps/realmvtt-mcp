@@ -12,6 +12,14 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Json, Query, RealmClient } from "../api/client.js";
 import { session, withAuthRecovery } from "../context.js";
 import { campaignArg, confirmArg, json, requireConfirm, safe, text } from "./registry.js";
+import {
+  fetchPage,
+  pageArgs,
+  pageResult,
+  provenanceOf,
+  tryLoadFolderIndex,
+  withSearch,
+} from "./listing.js";
 
 /**
  * What a journal page can link to, and the service each type is fetched from.
@@ -176,20 +184,47 @@ export function registerJournalTools(server: McpServer): void {
     "realm_find_journals",
     {
       title: "Find journals",
-      description: "List or search the campaign's journals (the containers that hold pages).",
-      inputSchema: { name: z.string().optional(), ...campaignArg },
+      description:
+        "List or search the campaign's journals (the containers that hold pages). Reports each " +
+        "journal's folder and provenance, and pages with `limit`/`skip`.",
+      inputSchema: {
+        name: z.string().optional().describe("Exact name match."),
+        search: z.string().optional().describe("Free-text search. Omit to list everything."),
+        folderId: z
+          .string()
+          .optional()
+          .describe("Only journals in this folder. Pass `root` for unfiled ones."),
+        ...pageArgs,
+        ...campaignArg,
+      },
     },
     safe(async (args) => {
       const client = session.client();
       return withAuthRecovery(async () => {
         const campaignId = await session.resolveCampaignId(client, args.campaign);
+        const folders = await tryLoadFolderIndex(client, campaignId, "journals");
         const query: Query = { campaignId };
         if (args.name) query.name = args.name;
-        const journals = await client.findAll<Json>("/journals", query);
-        return json({
-          total: journals.length,
-          journals: journals.map((j) => ({ id: j._id, name: j.name, category: j.category })),
-        });
+        if (args.folderId === "root") query.folderId = { $exists: false };
+        else if (args.folderId) query.folderId = args.folderId;
+
+        const page = await fetchPage<Json>(
+          client,
+          "/journals",
+          withSearch(query, args.search),
+          args.limit,
+          args.skip,
+        );
+
+        return json(
+          pageResult(page, "journals", (j) => ({
+            id: j._id,
+            name: j.name,
+            ...(j.category ? { category: j.category } : {}),
+            ...folders.decorate(j),
+            ...provenanceOf(j),
+          })),
+        );
       });
     }),
   );
