@@ -23,7 +23,7 @@ import { registerReferenceTools } from "./tools/references.js";
 import { registerAuditTools } from "./tools/audit.js";
 
 export const SERVER_NAME = "realmvtt";
-export const SERVER_VERSION = "0.8.0";
+export const SERVER_VERSION = "0.9.0";
 
 export function createServer(): McpServer {
   const server = new McpServer(

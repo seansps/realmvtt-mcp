@@ -164,7 +164,7 @@ something bespoke — the layout is the agent's to design, not a template's.
 | **Custom 3D models** | `realm_upload_3d_model` · `realm_list_3d_models` |
 | **3D minis** | `realm_search_3d_tokens` · `realm_set_3d_token` |
 | **Creature tokens** | `realm_list_tokens` · `realm_place_tokens` · `realm_move_token` · `realm_delete_tokens` |
-| **Pins, teleports, text** | `realm_list_markers` · `realm_add_pin` · `realm_add_teleporter` · `realm_add_text` · `realm_delete_marker` |
+| **Pins, teleports, text, journal links** | `realm_list_markers` · `realm_add_pin` · `realm_add_teleporter` · `realm_add_text` · `realm_add_journal_link` · `realm_update_journal_link` · `realm_delete_marker` |
 | **Links & dependencies** | `realm_find_backlinks` · `realm_dependency_graph` · `realm_validate_links` · `realm_replace_link_target` |
 | **Audit & tidying** | `realm_audit_campaign` · `realm_preview_folder_manifest` · `realm_apply_folder_manifest` |
 | **Reference** | `realm_guide` |

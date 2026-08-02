@@ -1,10 +1,16 @@
 /**
- * Scene markers: camera pins, teleporters, and floating text blocks.
+ * Scene markers: camera pins, teleporters, floating text blocks, and journal links.
  *
- * All three live on the scene LAYER, not in their own services — `layer.pins`,
- * `layer.teleporters`, `layer.textBlocks`, each an array of objects with a
- * frontend-generated `id`. So writing one is a read-modify-write of the layer,
- * done by patching the scene (see writeLayer for why not the scene-layers service).
+ * All of them live on the scene LAYER, not in their own services — `layer.pins`,
+ * `layer.teleporters`, `layer.textBlocks`, `layer.journals`. So writing one is a
+ * read-modify-write of the layer, done by patching the scene (see writeLayer for
+ * why not the scene-layers service).
+ *
+ * The first three carry a frontend-generated `id`. JOURNAL LINKS DO NOT: their
+ * `id` is the journal RECORD's id, the same value repeats when a journal is
+ * placed twice, and the client addresses them purely by array position. So they
+ * are identified here by INDEX, matching the UI, rather than by an id the app
+ * would ignore.
  *
  * PINS matter more than they look. A newly built scene opens the camera at its
  * default framing, which for a scene built out at, say, (40, 25) means the GM
@@ -25,6 +31,19 @@ export interface Marker extends Json {
   position: { x: number; y: number; z?: number };
 }
 
+/**
+ * A journal placed on a scene: a GM-only note marker that opens a journal page.
+ *
+ * `id` is the JOURNAL's id, not the marker's — see the module comment.
+ */
+export interface JournalLink extends Json {
+  id: string;
+  name?: string;
+  pageNumber?: number;
+  position: { x: number; y: number; z?: number };
+  alwaysShowName?: boolean;
+}
+
 /** The layer arrays this module manages. */
 export type MarkerKind = "pins" | "teleporters" | "textBlocks";
 
@@ -32,6 +51,68 @@ export type MarkerKind = "pins" | "teleporters" | "textBlocks";
 export function markersOn(layer: Json | undefined, kind: MarkerKind): Marker[] {
   const raw = layer?.[kind];
   return Array.isArray(raw) ? (raw as Marker[]) : [];
+}
+
+/** Read a layer's journal links, tolerating a layer that has none yet. */
+export function journalLinksOn(layer: Json | undefined): JournalLink[] {
+  const raw = layer?.journals;
+  return Array.isArray(raw) ? (raw as JournalLink[]) : [];
+}
+
+/** One entry of a journal's page outline, as `realm_journal_pages` returns it. */
+export interface PageOutline {
+  _id?: string;
+  name?: string;
+  pageNumber?: number;
+}
+
+/** Unwrap the page outline, which arrives either bare or Feathers-paginated. */
+export function pageList(result: unknown): PageOutline[] {
+  if (Array.isArray(result)) return result as PageOutline[];
+  const data = (result as { data?: unknown } | null)?.data;
+  return Array.isArray(data) ? (data as PageOutline[]) : [];
+}
+
+/**
+ * Turn a `page` argument into the 1-based number the scene link stores.
+ *
+ * The link records a page NUMBER, matched at click time against
+ * `journal-pages.pageNumber`. Numbers are renumbered when pages are reordered or
+ * deleted, so a caller that knows only "the Rumours page" has no safe number to
+ * pass — hence the name lookup, which is the form worth using.
+ *
+ * Returns null when a name matches nothing, so the caller can list the real page
+ * names instead of silently linking page 1.
+ */
+export function resolvePage(
+  pages: PageOutline[],
+  page: string | number | undefined,
+): { pageNumber: number; pageName?: string } | null {
+  if (typeof page === "number") {
+    const match = pages.find((p) => p.pageNumber === page);
+    return { pageNumber: page, pageName: match?.name };
+  }
+
+  if (typeof page === "string" && page.trim() !== "") {
+    // A numeric string is a page number the caller typed as text, not a page
+    // literally named "3".
+    const asNumber = Number(page);
+    if (Number.isInteger(asNumber) && asNumber > 0 && !pages.some((p) => p.name === page)) {
+      const match = pages.find((p) => p.pageNumber === asNumber);
+      return { pageNumber: asNumber, pageName: match?.name };
+    }
+
+    const wanted = page.trim().toLowerCase();
+    const match =
+      pages.find((p) => p.name?.trim().toLowerCase() === wanted) ??
+      pages.find((p) => p.name?.trim().toLowerCase().includes(wanted));
+    if (!match) return null;
+    return { pageNumber: match.pageNumber ?? 1, pageName: match.name };
+  }
+
+  // No page asked for: the journal's first page.
+  const first = pages.find((p) => p.pageNumber === 1) ?? pages[0];
+  return { pageNumber: first?.pageNumber ?? 1, pageName: first?.name };
 }
 
 /**
@@ -106,11 +187,15 @@ export function registerMarkerTools(server: McpServer): void {
   server.registerTool(
     "realm_list_markers",
     {
-      title: "List a scene's pins, teleporters and text",
+      title: "List a scene's pins, teleporters, text and journal links",
       description:
         "List the markers on a scene: camera PINS (GM location bookmarks), TELEPORTERS (linked " +
-        "pads that move tokens), and TEXT BLOCKS (floating labels). Also reports which pin the " +
-        "camera opens on.",
+        "pads that move tokens), TEXT BLOCKS (floating labels), and JOURNAL LINKS (note markers " +
+        "that open a journal page). Also reports which pin the camera opens on.\n\n" +
+        "Journal links carry an `index` — their position in the layer's array — which is how " +
+        "`realm_update_journal_link` and `realm_delete_marker` address them. Their `id` is the " +
+        "journal's id and repeats when the same journal is placed twice, so it identifies " +
+        "nothing on its own.",
       inputSchema: { sceneId: z.string(), ...campaignArg },
     },
     safe(async (args) => {
@@ -123,6 +208,7 @@ export function registerMarkerTools(server: McpServer): void {
           pins: markersOn(layer, "pins"),
           teleporters: markersOn(layer, "teleporters"),
           textBlocks: markersOn(layer, "textBlocks"),
+          journals: journalLinksOn(layer).map((j, index) => ({ index, ...j })),
         });
       });
     }),
@@ -313,24 +399,192 @@ export function registerMarkerTools(server: McpServer): void {
   );
 
   server.registerTool(
-    "realm_delete_marker",
+    "realm_add_journal_link",
     {
-      title: "Remove a pin, teleporter or text block",
+      title: "Place a journal on a scene",
       description:
-        "Remove a marker from a scene by its id (from `realm_list_markers`). Requires confirm: true.",
+        "Place a JOURNAL LINK on a scene — a note marker the GM clicks to open a journal at a " +
+        "particular page. Players never see them.\n\n" +
+        "Pass `page` as a page NAME (recommended) or a 1-based number; the marker's label " +
+        "defaults to that page's name, or the journal's name if the page has none. Omit `page` " +
+        "and it opens page 1.\n\n" +
+        "`z` is the cube elevation, so a link sits on the right floor of a 3D build and hides " +
+        "with the cut plane. Omit it on flat 2D maps, which ignore z.\n\n" +
+        "Only place these when asked. A map peppered with note markers reads like a diagram " +
+        "rather than a place.",
       inputSchema: {
         sceneId: z.string(),
-        kind: z.enum(["pins", "teleporters", "textBlocks"]).describe("Which kind of marker."),
-        id: z.string().describe("The marker's id."),
+        journalId: z.string().describe("The journal record's id, from `realm_find_journals`."),
+        x: z.number().describe("Grid x."),
+        y: z.number().describe("Grid y."),
+        z: z.number().optional().describe("Elevation in cubes, so the link sits on a floor (3D only)."),
+        page: z
+          .union([z.string(), z.number()])
+          .optional()
+          .describe("Page to open: its name (preferred) or 1-based number. Default page 1."),
+        name: z
+          .string()
+          .optional()
+          .describe("Marker label. Defaults to the page's name, else the journal's."),
+        alwaysShowName: z
+          .boolean()
+          .optional()
+          .describe("Render the label on the map instead of only on hover."),
+        ...campaignArg,
+      },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      return withAuthRecovery(async () => {
+        const journal = await client.get<Json>("/journals", args.journalId);
+        const pages = pageList(await client.journalPages(args.journalId));
+        const resolved = resolvePage(pages, args.page);
+
+        if (!resolved) {
+          const names = pages.map((p) => `${p.pageNumber}. ${p.name ?? "(untitled)"}`);
+          return text(
+            `No page named "${String(args.page)}" in this journal. Its pages are:\n` +
+              (names.length ? names.join("\n") : "(none)"),
+          );
+        }
+
+        const { scene, layer, layerIndex } = await getLayer(client, args.sceneId);
+        const link: JournalLink = {
+          id: args.journalId,
+          name: args.name ?? resolved.pageName ?? (journal.name as string | undefined) ?? "Journal",
+          pageNumber: resolved.pageNumber,
+          position: { x: args.x, y: args.y, ...(args.z !== undefined ? { z: args.z } : {}) },
+          ...(args.alwaysShowName ? { alwaysShowName: true } : {}),
+        };
+
+        const journals = [...journalLinksOn(layer), link];
+        await writeLayer(client, args.sceneId, scene, layerIndex, { journals });
+        return json({ added: link, index: journals.length - 1, totalJournalLinks: journals.length });
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_update_journal_link",
+    {
+      title: "Edit a journal link on a scene",
+      description:
+        "Change a placed JOURNAL LINK — its label, the page it opens, where it sits, or whether " +
+        "its label always shows. Address it by `index` from `realm_list_markers`; only the " +
+        "fields you pass are changed.\n\n" +
+        "`page` takes a page name or a 1-based number, resolved against the linked journal.",
+      inputSchema: {
+        sceneId: z.string(),
+        index: z.number().int().describe("The link's position in the layer, from `realm_list_markers`."),
+        name: z.string().optional().describe("New label."),
+        page: z.union([z.string(), z.number()]).optional().describe("New page: name or 1-based number."),
+        x: z.number().optional().describe("New grid x."),
+        y: z.number().optional().describe("New grid y."),
+        z: z.number().optional().describe("New elevation in cubes (3D only)."),
+        alwaysShowName: z.boolean().optional(),
+        ...campaignArg,
+      },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      return withAuthRecovery(async () => {
+        const { scene, layer, layerIndex } = await getLayer(client, args.sceneId);
+        const journals = journalLinksOn(layer);
+        const current = journals[args.index];
+
+        if (!current) {
+          return text(
+            `No journal link at index ${args.index} — this scene has ${journals.length}. ` +
+              "Call `realm_list_markers` for the current indices.",
+          );
+        }
+
+        const patch: Partial<JournalLink> = {};
+        if (args.name !== undefined) patch.name = args.name;
+        if (args.alwaysShowName !== undefined) patch.alwaysShowName = args.alwaysShowName;
+
+        if (args.page !== undefined) {
+          const pages = pageList(await client.journalPages(current.id));
+          const resolved = resolvePage(pages, args.page);
+          if (!resolved) {
+            const names = pages.map((p) => `${p.pageNumber}. ${p.name ?? "(untitled)"}`);
+            return text(
+              `No page named "${String(args.page)}" in the linked journal. Its pages are:\n` +
+                (names.length ? names.join("\n") : "(none)"),
+            );
+          }
+          patch.pageNumber = resolved.pageNumber;
+        }
+
+        if (args.x !== undefined || args.y !== undefined || args.z !== undefined) {
+          // Merge onto the existing position: patching x alone must not drop the z
+          // that puts the link on an upper floor.
+          const next = {
+            x: args.x ?? current.position?.x,
+            y: args.y ?? current.position?.y,
+            ...(args.z ?? current.position?.z) !== undefined
+              ? { z: args.z ?? current.position?.z }
+              : {},
+          };
+          patch.position = next as JournalLink["position"];
+        }
+
+        const updated = { ...current, ...patch };
+        const next = [...journals];
+        next[args.index] = updated;
+        await writeLayer(client, args.sceneId, scene, layerIndex, { journals: next });
+        return json({ updated, index: args.index });
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_delete_marker",
+    {
+      title: "Remove a pin, teleporter, text block or journal link",
+      description:
+        "Remove a marker from a scene, using the identifiers `realm_list_markers` reports: pins, " +
+        "teleporters and text blocks by `id`; journal links by `index`, since they have no id of " +
+        "their own. Requires confirm: true.",
+      inputSchema: {
+        sceneId: z.string(),
+        kind: z
+          .enum(["pins", "teleporters", "textBlocks", "journals"])
+          .describe("Which kind of marker."),
+        id: z.string().optional().describe("The marker's id. For pins, teleporters and text blocks."),
+        index: z.number().int().optional().describe("The link's array position. For journals."),
         ...confirmArg,
         ...campaignArg,
       },
     },
     safe(async (args) => {
-      requireConfirm(args.confirm, `remove ${args.kind} marker ${args.id}`);
+      const what = args.kind === "journals" ? `index ${args.index}` : `id ${args.id}`;
+      requireConfirm(args.confirm, `remove ${args.kind} marker ${what}`);
       const client = session.client();
       return withAuthRecovery(async () => {
         const { scene, layer, layerIndex } = await getLayer(client, args.sceneId);
+
+        if (args.kind === "journals") {
+          if (args.index === undefined) {
+            return text("Journal links are removed by `index` — get it from `realm_list_markers`.");
+          }
+          const journals = journalLinksOn(layer);
+          const doomed = journals[args.index];
+          if (!doomed) {
+            return text(
+              `No journal link at index ${args.index} — this scene has ${journals.length}.`,
+            );
+          }
+          const after = journals.filter((_, i) => i !== args.index);
+          await writeLayer(client, args.sceneId, scene, layerIndex, { journals: after });
+          return text(
+            `Removed journal link ${args.index} (${doomed.name ?? "unnamed"}). ` +
+              "Indices after it have shifted down by one.",
+          );
+        }
+
+        if (!args.id) return text(`Pass the marker's \`id\` to remove a ${args.kind} marker.`);
+
         const before = markersOn(layer, args.kind);
         const after = before.filter((m) => m.id !== args.id);
 

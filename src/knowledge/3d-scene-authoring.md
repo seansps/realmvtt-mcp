@@ -449,9 +449,26 @@ So finish a new scene with a camera pin at the middle of it:
 `center: true` puts it at the middle of everything already placed; `makeDefault`
 makes the camera open there. Pins are GM-only — players never see them.
 
-Beyond that one, add pins, **teleporters** and **text blocks** only when asked.
-Teleporters change how a map plays, and unrequested floating labels make a scene
-read like a diagram instead of a place.
+Beyond that one, add pins, **teleporters**, **text blocks** and **journal links**
+only when asked. Teleporters change how a map plays, and unrequested floating
+labels make a scene read like a diagram instead of a place.
+
+A **journal link** (`realm_add_journal_link`) is a note marker the GM clicks to
+open a journal at a chosen page — the right tool when someone asks for room
+descriptions or a read-aloud box attached to a spot on the map:
+
+```jsonc
+// realm_add_journal_link
+{ "sceneId": "…", "journalId": "…", "x": 12, "y": 8, "z": 0.45, "page": "The Cellar" }
+```
+
+Give `page` a page NAME rather than a number: the scene stores a page number, and
+numbers get reshuffled when pages are reordered, so a name is the only thing you
+can actually know is right. `z` puts the link on the correct floor — without it a
+link on an upper story is computed from the geometry underneath.
+
+Journal links are addressed by their `index` in `realm_list_markers`, not by id
+(their `id` is the journal's, and repeats when a journal is placed twice).
 
 ## 13. Checklist before placing
 
