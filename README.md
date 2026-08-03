@@ -158,6 +158,7 @@ something bespoke — the layout is the agent's to design, not a template's.
 | **Folders** | `realm_list_folders` · `realm_write_folder` · `realm_move_to_folder` · `realm_delete_folder` |
 | **Journals** | `realm_find_journals` · `realm_write_journal` · `realm_journal_pages` · `realm_write_journal_page` · `realm_delete_journal_page` |
 | **Images** | `realm_upload_image` · `realm_list_images` · `realm_find_image` · `realm_set_portrait` · `realm_journal_image_html` |
+| **Sounds** | `realm_upload_sound` · `realm_list_sounds` · `realm_get_sound` · `realm_place_sound` · `realm_list_scene_sounds` · `realm_update_scene_sound` · `realm_remove_scene_sound` |
 | **Scenes** | `realm_create_scene` |
 | **Rulesets** | `realm_list_rulesets` · `realm_get_ruleset` · `realm_write_ruleset` · `realm_compile_ruleset` |
 | **3D scenes** | `realm_list_scenes` · `realm_get_scene` · `realm_search_3d_assets` · `realm_get_room_kit` · `realm_get_scene_objects` · `realm_place_objects` · `realm_update_object` · `realm_delete_objects` · `realm_clear_scene` |

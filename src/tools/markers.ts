@@ -145,7 +145,7 @@ export function centerOfObjects(
 }
 
 /** Fetch a scene and its active layer. */
-async function getLayer(
+export async function getLayer(
   client: RealmClient,
   sceneId: string,
 ): Promise<{ scene: Json; layer: Json; layerIndex: number }> {
@@ -171,7 +171,7 @@ async function getLayer(
  * passes the scene it already read and we merge into that — keeping the
  * read-modify-write window as short as possible.
  */
-async function writeLayer(
+export async function writeLayer(
   client: RealmClient,
   sceneId: string,
   scene: Json,

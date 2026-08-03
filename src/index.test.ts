@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, symlinkSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,5 +97,18 @@ describe.skipIf(!built)("the published binary", () => {
 
     const result = await handshake(link);
     expect(result.capabilities).toHaveProperty("tools");
+  });
+
+  /**
+   * The version a client sees comes from SERVER_VERSION, not package.json, so the
+   * two drift silently: 0.9.1 published while the handshake still said 0.9.0.
+   * Nothing breaks loudly, which is exactly why it goes unnoticed.
+   */
+  it("advertises the version it was published as", async () => {
+    const pkg = JSON.parse(
+      await readFile(resolve(here, "..", "package.json"), "utf8"),
+    ) as { version: string };
+    const result = await handshake(builtEntry);
+    expect((result.serverInfo as { version: string }).version).toBe(pkg.version);
   });
 });
