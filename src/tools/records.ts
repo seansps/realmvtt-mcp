@@ -96,7 +96,7 @@ export function buildRecordLink(link: CellLinkInput): Json {
   return built;
 }
 
-/** An effect rule type declared by a ruleset (`ruleset.effects[]`). */
+/** An effect rule type declared by a ruleset (`ruleset.settings.effects[]`). */
 export interface RulesetEffectType {
   label: string;
   type: string;
@@ -119,6 +119,44 @@ export const BUILT_IN_EFFECT_TYPES: Array<{ type: string; label: string }> = [
   { type: "token", label: "Change the Token" },
   { type: "addEffect", label: "Apply Another Effect" },
 ];
+
+/** A ruleset as far as effect types are concerned. */
+export interface EffectTypeRuleset {
+  settings?: { effects?: RulesetEffectType[] };
+}
+
+export interface MergedEffectType {
+  type: string;
+  label: string;
+  source: "ruleset" | "built-in";
+  freeTextField: boolean;
+  fields: Array<{ field: string; label: string }>;
+}
+
+/**
+ * Merge the ruleset's declared types with the built-ins the same way the app does:
+ * the ruleset's first, then any built-in it did not already redefine.
+ */
+export function mergeEffectTypes(ruleset: EffectTypeRuleset | null): MergedEffectType[] {
+  const raw = ruleset?.settings?.effects;
+  const declared = Array.isArray(raw) ? raw : [];
+  const seen = new Set(declared.map((e) => e.type));
+  return [
+    ...declared.map((e) => ({
+      type: e.type,
+      label: e.label,
+      source: "ruleset" as const,
+      freeTextField: Boolean(e.freeTextField),
+      fields: (e.fields ?? []).map((f) => ({ field: f.field, label: f.label })),
+    })),
+    ...BUILT_IN_EFFECT_TYPES.filter((t) => !seen.has(t.type)).map((t) => ({
+      ...t,
+      source: "built-in" as const,
+      freeTextField: false,
+      fields: [],
+    })),
+  ];
+}
 
 const TABLE_LINKING_GUIDE = `Linking roll-table results
 ==========================
@@ -545,39 +583,19 @@ export function registerRecordTools(server: McpServer): void {
         const campaign = await client.get<Json>("/campaigns", campaignId);
         const rulesetId = campaign.rulesetId ? String(campaign.rulesetId) : "";
 
-        let declared: RulesetEffectType[] = [];
-        if (rulesetId) {
-          const ruleset = await client.get<{ effects?: RulesetEffectType[] }>(
-            "/rulesets",
-            rulesetId,
-          );
-          declared = Array.isArray(ruleset.effects) ? ruleset.effects : [];
-        }
-
-        // The app merges the same way: the ruleset's types first, then any built-in
-        // it didn't already define. A ruleset CAN redefine a built-in's label/fields.
-        const seen = new Set(declared.map((e) => e.type));
-        const types = [
-          ...declared.map((e) => ({
-            type: e.type,
-            label: e.label,
-            source: "ruleset" as const,
-            freeTextField: Boolean(e.freeTextField),
-            fields: (e.fields ?? []).map((f) => ({ field: f.field, label: f.label })),
-          })),
-          ...BUILT_IN_EFFECT_TYPES.filter((t) => !seen.has(t.type)).map((t) => ({
-            ...t,
-            source: "built-in" as const,
-            freeTextField: false,
-            fields: [],
-          })),
-        ];
+        // The declared types live under `settings.effects` — the client reads the
+        // same path (RecordWindow/Effect: `selectedRuleset?.settings?.effects`).
+        const ruleset = rulesetId
+          ? await client.get<EffectTypeRuleset>("/rulesets", rulesetId)
+          : null;
+        const types = mergeEffectTypes(ruleset);
+        const declaredCount = types.filter((t) => t.source === "ruleset").length;
 
         return json({
           campaignId,
           rulesetId: rulesetId || null,
           note:
-            declared.length > 0
+            declaredCount > 0
               ? "Rule shape: { type, field, valueType, value }. A custom `field` string is always " +
                 "allowed, but prefer a declared one — the ruleset's scripts look for those."
               : "This campaign's ruleset declares no extra effect types, so only the built-ins apply.",

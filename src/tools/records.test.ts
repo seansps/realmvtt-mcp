@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRecordLink } from "./records.js";
+import { BUILT_IN_EFFECT_TYPES, buildRecordLink, mergeEffectTypes } from "./records.js";
 
 describe("buildRecordLink", () => {
   it("links a cell to another table — the mechanism for tables that roll on tables", () => {
@@ -67,5 +67,53 @@ describe("encounter count conventions", () => {
     for (const ok of ["1", "6", "1d6", "1d4+1", "2d4", "3*$PC", "$PC", "#PC", "$PC/2"]) {
       expect(DICE_BEFORE_OPERATOR.test(ok)).toBe(false);
     }
+  });
+});
+
+describe("mergeEffectTypes", () => {
+  // Regression: the tool used to read `ruleset.effects`, but the ruleset schema puts
+  // them under `settings.effects` (the client reads `selectedRuleset?.settings?.effects`).
+  // Every ruleset therefore reported "declares no extra effect types".
+  it("reads the declared types from settings.effects", () => {
+    const types = mergeEffectTypes({
+      settings: {
+        effects: [
+          {
+            label: "Circumstance Penalty",
+            type: "cir_pen",
+            fields: [{ label: "Armor Class", field: "data.ac" }],
+          },
+        ],
+      },
+    });
+    expect(types[0]).toEqual({
+      type: "cir_pen",
+      label: "Circumstance Penalty",
+      source: "ruleset",
+      freeTextField: false,
+      fields: [{ field: "data.ac", label: "Armor Class" }],
+    });
+    expect(types).toHaveLength(BUILT_IN_EFFECT_TYPES.length + 1);
+  });
+
+  it("ignores a stray top-level effects array — that path is not the app's", () => {
+    const types = mergeEffectTypes({ effects: [{ label: "Nope", type: "nope" }] } as never);
+    expect(types.every((t) => t.source === "built-in")).toBe(true);
+  });
+
+  it("lets a ruleset redefine a built-in instead of listing it twice", () => {
+    const types = mergeEffectTypes({
+      settings: { effects: [{ label: "Change the Mini", type: "token", freeTextField: true }] },
+    });
+    expect(types.filter((t) => t.type === "token")).toEqual([
+      { type: "token", label: "Change the Mini", source: "ruleset", freeTextField: true, fields: [] },
+    ]);
+    expect(types).toHaveLength(BUILT_IN_EFFECT_TYPES.length);
+  });
+
+  it("falls back to the built-ins with no ruleset", () => {
+    expect(mergeEffectTypes(null).map((t) => t.type)).toEqual(
+      BUILT_IN_EFFECT_TYPES.map((t) => t.type),
+    );
   });
 });
