@@ -304,7 +304,11 @@ export function registerRecordTools(server: McpServer): void {
         "With `id` it patches that record; without one it creates a new record in the campaign. " +
         "Ruleset fields usually live under `data` — fetch a similar existing record first to see " +
         "the shape that campaign's ruleset expects, since it differs per ruleset. " +
-        "For roll tables use `realm_write_table` instead.",
+        "For roll tables use `realm_write_table` instead.\n\n" +
+        "ARTWORK lives on `portrait`, and there is no separate `icon` field. Set it to a Realm " +
+        "VTT catalog path from `realm_find_icons` (`/icons/…`, a free reference) or to an " +
+        "uploaded image's stored path (`/images/…`). `realm_get_record` and `realm_find_records` " +
+        "both return `portrait`, which is how to verify an assignment.",
       inputSchema: {
         type: recordTypeArg,
         id: z.string().optional().describe("Record id to update. Omit to create."),

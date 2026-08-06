@@ -20,6 +20,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Json, RealmClient } from "../api/client.js";
 import { authStore } from "../auth/store.js";
 import { session, withAuthRecovery } from "../context.js";
+import { ASSET_CDN, cdnUrl } from "./assets.js";
+import { resolveIcon } from "./icons.js";
 import { campaignArg, json, safe, text } from "./registry.js";
 import {
   fetchPage,
@@ -31,13 +33,8 @@ import {
   type FolderIndex,
 } from "./listing.js";
 
-/** Where uploaded assets are served from. Stored paths are relative to this. */
-export const ASSET_CDN = "https://assets.realmvtt.com";
-
-export function cdnUrl(storedPath: string): string {
-  const path = storedPath.startsWith("/") ? storedPath : `/${storedPath}`;
-  return `${ASSET_CDN}${path}`;
-}
+// Re-exported so existing importers keep finding these here.
+export { ASSET_CDN, cdnUrl };
 
 /**
  * The `<img>` markup a journal page uses, matching what the bulk journal
@@ -440,6 +437,9 @@ export function registerImageTools(server: McpServer): void {
         "Give a record (NPC, character, item, …) or an effect its portrait, uploading a local " +
         "file if needed. With `asToken: true` it also becomes the record's 2D token image, which " +
         "is what appears on a map.\n\n" +
+        "For stock artwork on a spell, item or feat, pass `icon` instead — a Realm VTT catalog " +
+        "path from `realm_find_icons`, which costs no storage. Use `realm_set_record_icons` to " +
+        "do that for many records at once.\n\n" +
         "For a 3D mini instead of a flat image, use `realm_set_3d_token`.",
       inputSchema: {
         recordId: z.string().describe("The record's or effect's id."),
@@ -454,19 +454,54 @@ export function registerImageTools(server: McpServer): void {
           .string()
           .optional()
           .describe("An existing image: record id, stored path, or name to search for."),
+        icon: z
+          .string()
+          .optional()
+          .describe(
+            "A Realm VTT catalog icon path from `realm_find_icons`, e.g. " +
+              "`/icons/fantasy/magic/fire/fireball.webp`. Stored as a reference — nothing is " +
+              "uploaded and no image-library asset is created.",
+          ),
         asToken: z.boolean().optional().describe("Also use it as the record's 2D token image."),
         ...campaignArg,
       },
     },
     safe(async (args) => {
-      if (!args.imagePath && !args.image) {
-        return text("Pass `imagePath` to upload a new image, or `image` to use an existing one.");
+      if (!args.imagePath && !args.image && !args.icon) {
+        return text(
+          "Pass `imagePath` to upload a new image, `image` to use one already in the campaign, " +
+            "or `icon` for a Realm VTT catalog icon.",
+        );
       }
 
       const client = session.client();
       const type = args.type ?? "npcs";
 
       return withAuthRecovery(async () => {
+        // An icon is a catalog reference, so it needs no campaign scope and no upload —
+        // just validation that the path is real.
+        if (args.icon) {
+          const icon = await resolveIcon(client, args.icon);
+          const path = type === "effects" ? "/effects" : client.recordEndpoint(type).path;
+          const patch: Json = { portrait: icon };
+          if (args.asToken) {
+            const record = await client.get<Json>(path, args.recordId);
+            const existingToken = (record.token as Json) ?? {};
+            patch.token = {
+              ...existingToken,
+              creatorId: existingToken.creatorId ?? authStore.read()?.user?._id ?? "",
+              imageUrl: icon,
+            };
+          }
+          const updated = await client.patch<Json>(path, args.recordId, patch);
+          return json({
+            record: { id: updated._id, name: updated.name },
+            portrait: icon,
+            cdnUrl: cdnUrl(icon),
+            ...(args.asToken ? { tokenImage: icon } : {}),
+          });
+        }
+
         const campaignId = await session.resolveCampaignId(client, args.campaign);
         const resolved = args.imagePath
           ? await uploadAndRegister(client, campaignId, args.imagePath, {})

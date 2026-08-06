@@ -9,8 +9,10 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { registerAnimationTools } from "./tools/animations.js";
 import { registerAuthTools } from "./tools/auth.js";
 import { registerGuideTools } from "./tools/guide.js";
+import { registerIconTools } from "./tools/icons.js";
 import { registerImageTools } from "./tools/images.js";
 import { registerJournalTools } from "./tools/journals.js";
 import { registerRecordTools } from "./tools/records.js";
@@ -24,7 +26,7 @@ import { registerReferenceTools } from "./tools/references.js";
 import { registerAuditTools } from "./tools/audit.js";
 
 export const SERVER_NAME = "realmvtt";
-export const SERVER_VERSION = "0.9.3";
+export const SERVER_VERSION = "1.0.0";
 
 export function createServer(): McpServer {
   const server = new McpServer(
@@ -42,6 +44,8 @@ export function createServer(): McpServer {
   registerRecordTools(server);
   registerJournalTools(server);
   registerImageTools(server);
+  registerIconTools(server);
+  registerAnimationTools(server);
   registerRulesetTools(server);
   registerScene3dTools(server);
   registerSoundTools(server);
