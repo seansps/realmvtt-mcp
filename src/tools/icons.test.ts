@@ -87,6 +87,44 @@ describe("normalizeIconPath", () => {
   });
 });
 
+describe("what actually gets stored on `portrait`", () => {
+  /**
+   * The stored value is the BARE catalog path — never the CDN URL. `realm_find_icons`
+   * hands back both `path` and `url` for the same icon, so the wrong one is always one
+   * slip away, and a stored URL would break the client's `getImageUrl`, which prefixes
+   * the asset host onto whatever it finds.
+   *
+   * Every write path funnels through `normalizeIconPath`, so this is the invariant.
+   */
+  it("stores the bare path, whichever form the caller supplied", () => {
+    const stored = "/icons/fantasy/bows/bow-1.webp";
+    for (const supplied of [
+      stored,
+      "icons/fantasy/bows/bow-1.webp",
+      "https://assets.realmvtt.com/icons/fantasy/bows/bow-1.webp",
+      "  /icons/fantasy/bows/bow-1.webp  ",
+    ]) {
+      expect(normalizeIconPath(supplied), supplied).toBe(stored);
+    }
+  });
+
+  it("never lets a host reach the record", () => {
+    const icon = describeIcon("/icons/fantasy/bows/bow-1.webp");
+    expect(normalizeIconPath(icon.url)).toBe(icon.path);
+    expect(icon.path).not.toContain("http");
+    expect(icon.path).not.toContain("assets.realmvtt.com");
+  });
+
+  it("normalizes before catalog validation, so a pasted URL still resolves", () => {
+    // The manifest holds bare paths. Validating the raw input would reject a URL the
+    // model copied out of a preview, instead of accepting the icon it names.
+    const manifest = new Set(["/icons/fantasy/bows/bow-1.webp"]);
+    expect(
+      manifest.has(normalizeIconPath("https://assets.realmvtt.com/icons/fantasy/bows/bow-1.webp")),
+    ).toBe(true);
+  });
+});
+
 describe("isIconPath", () => {
   it("accepts catalog references in any of the forms callers send", () => {
     expect(isIconPath("/icons/a/b.webp")).toBe(true);
