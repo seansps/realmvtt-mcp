@@ -40,6 +40,8 @@ export interface JournalLink extends Json {
   id: string;
   name?: string;
   pageNumber?: number;
+  /** The linked page's own id — survives a reorder, unlike pageNumber. */
+  pageId?: string;
   position: { x: number; y: number; z?: number };
   alwaysShowName?: boolean;
 }
@@ -61,6 +63,8 @@ export function journalLinksOn(layer: Json | undefined): JournalLink[] {
 
 /** One entry of a journal's page outline, as `realm_journal_pages` returns it. */
 export interface PageOutline {
+  /** `journal-functions.pages` returns the page id as `id`. */
+  id?: string;
   _id?: string;
   name?: string;
   pageNumber?: number;
@@ -74,12 +78,16 @@ export function pageList(result: unknown): PageOutline[] {
 }
 
 /**
- * Turn a `page` argument into the 1-based number the scene link stores.
+ * Turn a `page` argument into what the scene link stores.
  *
- * The link records a page NUMBER, matched at click time against
- * `journal-pages.pageNumber`. Numbers are renumbered when pages are reordered or
- * deleted, so a caller that knows only "the Rumours page" has no safe number to
- * pass — hence the name lookup, which is the form worth using.
+ * The link records both the page NUMBER (what older clients read) and the page
+ * ID. The number alone is fragile: it is reassigned when pages are reordered,
+ * so a link that stored only a number can end up opening a different page. The
+ * id pins it, and lets the app say "that page was deleted" rather than opening
+ * whatever inherited the number.
+ *
+ * A caller that knows only "the Rumours page" has no safe number to pass —
+ * hence the name lookup, which is the form worth using.
  *
  * Returns null when a name matches nothing, so the caller can list the real page
  * names instead of silently linking page 1.
@@ -87,10 +95,10 @@ export function pageList(result: unknown): PageOutline[] {
 export function resolvePage(
   pages: PageOutline[],
   page: string | number | undefined,
-): { pageNumber: number; pageName?: string } | null {
+): { pageNumber: number; pageName?: string; pageId?: string } | null {
   if (typeof page === "number") {
     const match = pages.find((p) => p.pageNumber === page);
-    return { pageNumber: page, pageName: match?.name };
+    return { pageNumber: page, pageName: match?.name, pageId: match?.id ?? match?._id };
   }
 
   if (typeof page === "string" && page.trim() !== "") {
@@ -99,7 +107,11 @@ export function resolvePage(
     const asNumber = Number(page);
     if (Number.isInteger(asNumber) && asNumber > 0 && !pages.some((p) => p.name === page)) {
       const match = pages.find((p) => p.pageNumber === asNumber);
-      return { pageNumber: asNumber, pageName: match?.name };
+      return {
+        pageNumber: asNumber,
+        pageName: match?.name,
+        pageId: match?.id ?? match?._id,
+      };
     }
 
     const wanted = page.trim().toLowerCase();
@@ -107,12 +119,20 @@ export function resolvePage(
       pages.find((p) => p.name?.trim().toLowerCase() === wanted) ??
       pages.find((p) => p.name?.trim().toLowerCase().includes(wanted));
     if (!match) return null;
-    return { pageNumber: match.pageNumber ?? 1, pageName: match.name };
+    return {
+      pageNumber: match.pageNumber ?? 1,
+      pageName: match.name,
+      pageId: match.id ?? match._id,
+    };
   }
 
   // No page asked for: the journal's first page.
   const first = pages.find((p) => p.pageNumber === 1) ?? pages[0];
-  return { pageNumber: first?.pageNumber ?? 1, pageName: first?.name };
+  return {
+    pageNumber: first?.pageNumber ?? 1,
+    pageName: first?.name,
+    pageId: first?.id ?? first?._id,
+  };
 }
 
 /**
@@ -453,6 +473,7 @@ export function registerMarkerTools(server: McpServer): void {
           id: args.journalId,
           name: args.name ?? resolved.pageName ?? (journal.name as string | undefined) ?? "Journal",
           pageNumber: resolved.pageNumber,
+          ...(resolved.pageId ? { pageId: resolved.pageId } : {}),
           position: { x: args.x, y: args.y, ...(args.z !== undefined ? { z: args.z } : {}) },
           ...(args.alwaysShowName ? { alwaysShowName: true } : {}),
         };
@@ -514,6 +535,10 @@ export function registerMarkerTools(server: McpServer): void {
             );
           }
           patch.pageNumber = resolved.pageNumber;
+          // Re-pin the id to the newly chosen page; a link whose new page has
+          // no resolvable id falls back to number-only rather than keeping the
+          // old id, which would point at the page the caller just moved off.
+          patch.pageId = resolved.pageId;
         }
 
         if (args.x !== undefined || args.y !== undefined || args.z !== undefined) {

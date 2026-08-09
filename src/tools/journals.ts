@@ -50,6 +50,13 @@ export interface JournalLinkInput {
   /** Journals only: clicking the link opens this page. */
   pageNumber?: number;
   /**
+   * Journals only: the page's own id. Written alongside `pageNumber`, which
+   * older clients read. The id is what survives the journal being reordered,
+   * and what lets the app report a deleted page instead of opening whichever
+   * page inherited the number.
+   */
+  pageId?: string;
+  /**
    * Chip icon, when the caller genuinely knows it — e.g. read off the ruleset's
    * record-type definition. Never guessed here; see `enrichLinkValue`.
    */
@@ -132,6 +139,7 @@ export function journalRecordLinkHtml(link: JournalLinkInput): string {
   // An explicit recordType wins: it is how the caller narrows /records.
   if (TYPED_LINKS.has(link.type) && link.recordType) value.recordType = link.recordType;
   if (link.type === "journals" && link.pageNumber) value.pageNumber = link.pageNumber;
+  if (link.type === "journals" && link.pageId) value.pageId = link.pageId;
   // A caller-supplied icon beats the record's; scenes are fixed regardless.
   if (link.icon) value.icon = link.icon;
   if (link.type === "scenes") value.icon = "IconMap";
@@ -353,6 +361,13 @@ export function registerJournalTools(server: McpServer): void {
           .number()
           .optional()
           .describe("With type `journals`: open this page number (1-based)."),
+        pageId: z
+          .string()
+          .optional()
+          .describe(
+            "With type `journals`: the page's id. Looked up from `pageNumber` when omitted, " +
+              "so a link keeps working after the journal is reordered.",
+          ),
         label: z.string().optional().describe("Link text. Defaults to the target's name."),
         icon: z
           .string()
@@ -377,6 +392,21 @@ export function registerJournalTools(server: McpServer): void {
           args.target,
           args.recordType,
         );
+        // Resolve the page id from the number so the link survives a reorder.
+        // Best-effort: a journal whose pages cannot be read still yields a
+        // working number-only link, exactly as before.
+        let pageId = args.pageId;
+        if (args.type === "journals" && args.pageNumber && !pageId) {
+          try {
+            const pages = await client.journalPages<
+              { id: string; pageNumber: number }[]
+            >(String(resolved._id));
+            pageId = pages.find((p) => p.pageNumber === args.pageNumber)?.id;
+          } catch {
+            pageId = undefined;
+          }
+        }
+
         const html = journalRecordLinkHtml({
           type: args.type,
           id: String(resolved._id),
@@ -385,8 +415,9 @@ export function registerJournalTools(server: McpServer): void {
           ...(args.icon ? { icon: args.icon } : {}),
           ...(args.recordType ? { recordType: args.recordType } : {}),
           ...(args.pageNumber ? { pageNumber: args.pageNumber } : {}),
+          ...(pageId ? { pageId } : {}),
         });
-        return json({ html, id: resolved._id, name: resolved.name });
+        return json({ html, id: resolved._id, name: resolved.name, pageId });
       });
     }),
   );

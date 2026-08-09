@@ -710,7 +710,13 @@ export function registerRecordTools(server: McpServer): void {
           .record(z.string(), z.unknown())
           .describe(
             "Encounter body: `name` plus a non-empty `npcs` array of { npcId, name, count } — " +
-              "count being the string expression described above.",
+              "count being the string expression described above, and `name` being the name the " +
+              "created tokens take (blank falls back to the NPC's). Each entry also takes optional " +
+              "`unidentifiedName` (shown while the tokens are unidentified) and this " +
+              "token state used when it is added to the tracker: `faction` (\"enemy\" default, or " +
+              "\"friend\"/\"neutral\"), `visible` (false default), `identified` (true default), and " +
+              "`tokenImageUrl` (a token image url — copied from another NPC's token — used " +
+              "for these tokens instead of the NPC's own art).",
           ),
         ...campaignArg,
       },

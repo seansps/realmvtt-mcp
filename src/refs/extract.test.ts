@@ -232,6 +232,28 @@ describe("refsFromEncounter", () => {
     expect(refs).toHaveLength(1);
     expect(refs[0]).toMatchObject({ via: "encounter-npc", to: { kind: "npcs", id: "n1" } });
   });
+
+  // An entry's token-art override keeps that image in use even though no record
+  // points at it — miss it and an "unused images" sweep offers to delete it.
+  it("counts an entry's token image override as a reference", () => {
+    const refs = refsFromEncounter({
+      _id: "e1",
+      name: "Ambush",
+      npcs: [
+        {
+          npcId: "n1",
+          name: "Goblin",
+          count: "2",
+          tokenImageUrl: "https://cdn.example.com/images/dire-wolf.webp",
+        },
+      ],
+    });
+    expect(refs).toHaveLength(2);
+    expect(refs[1]).toMatchObject({
+      via: "token-image",
+      to: { kind: "image-path", path: "/images/dire-wolf.webp" },
+    });
+  });
 });
 
 describe("refsFromSceneObjects", () => {

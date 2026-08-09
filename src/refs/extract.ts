@@ -412,18 +412,32 @@ export function refsFromEncounter(encounter: Json): Reference[] {
     service: "/encounters",
   };
   const npcs = Array.isArray(encounter.npcs) ? (encounter.npcs as Json[]) : [];
-  return npcs
-    .filter((n) => n.npcId)
-    .map((n) => ({
-      from,
-      to: {
-        kind: "npcs" as TargetKind,
-        id: String(n.npcId),
-        ...(n.name ? { label: String(n.name) } : {}),
-      },
-      via: "encounter-npc" as RefVia,
-      ...(n.name ? { at: String(n.name) } : {}),
-    }));
+  return npcs.flatMap((n) => {
+    const refs: Reference[] = [];
+    if (n.npcId) {
+      refs.push({
+        from,
+        to: {
+          kind: "npcs" as TargetKind,
+          id: String(n.npcId),
+          ...(n.name ? { label: String(n.name) } : {}),
+        },
+        via: "encounter-npc" as RefVia,
+        ...(n.name ? { at: String(n.name) } : {}),
+      });
+    }
+    // An entry can override the token art with an image url, which keeps that
+    // image in use even though no record points at it.
+    if (typeof n.tokenImageUrl === "string" && n.tokenImageUrl) {
+      refs.push({
+        from,
+        to: { kind: "image-path", path: storedPathOf(n.tokenImageUrl) },
+        via: "token-image",
+        ...(n.name ? { at: String(n.name) } : {}),
+      });
+    }
+    return refs;
+  });
 }
 
 /**
