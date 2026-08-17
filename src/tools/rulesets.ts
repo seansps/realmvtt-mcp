@@ -43,8 +43,18 @@ export function slugify(name: string): string {
 /** A map of the ruleset's shape — enough to reason about it without reading megabytes. */
 export function describeRuleset(rs: Ruleset): Json {
   const records = Array.isArray(rs.records) ? rs.records : [];
-  const scripts = (rs.settings as { otherSettings?: { scripts?: Json } } | undefined)?.otherSettings
-    ?.scripts;
+  const other = (
+    rs.settings as
+      | {
+          otherSettings?: {
+            scripts?: Json;
+            onCampaignLoad?: string;
+            campaignPanel?: { name?: string; gmOnly?: boolean };
+          };
+        }
+      | undefined
+  )?.otherSettings;
+  const scripts = other?.scripts;
   return {
     id: rs._id,
     name: rs.name,
@@ -58,6 +68,17 @@ export function describeRuleset(rs: Ruleset): Json {
     })),
     globalScripts: scripts ? Object.keys(scripts) : [],
     settingsKeys: rs.settings ? Object.keys(rs.settings) : [],
+    // Campaign Values feature: a hook that seeds campaign variables on GM
+    // entry, and a ruleset-defined panel window rendering them.
+    hasOnCampaignLoad: !!other?.onCampaignLoad,
+    ...(other?.campaignPanel
+      ? {
+          campaignPanel: {
+            name: other.campaignPanel.name || "Campaign Values",
+            gmOnly: !!other.campaignPanel.gmOnly,
+          },
+        }
+      : {}),
   };
 }
 

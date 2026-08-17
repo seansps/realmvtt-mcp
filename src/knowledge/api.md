@@ -50,6 +50,20 @@ New scenes take their grid units from the campaign's ruleset
 (`settings.otherSettings.defaultUnitsPerSquare` / `defaultUnits`), which is why one
 system measures in feet and another in metres.
 
+### Campaign variables (Campaign Values)
+
+Campaigns carry a `campaignVariables` map — ruleset-script-managed runtime state
+(dice pools, tension tracks, counters) shared live by the whole table. JSON values
+only; the backend caps size (100 keys, 8 KB/value, 64 KB total). Any campaign
+member may patch that one field on `/campaigns`; everything else stays GM-only.
+Two related ruleset settings: `settings.otherSettings.onCampaignLoad` (a script run
+on GM entry to seed defaults — must be idempotent) and
+`settings.otherSettings.campaignPanel` (`{ name, icon, layout, gmOnly, width,
+height }` — a window rendering the variables with record-tab layout HTML, shown
+under the client's View menu). The ruleset summary reports these as
+`hasOnCampaignLoad` and `campaignPanel`. Editing them goes through the normal
+ruleset source → `realm_compile_ruleset` → `realm_write_ruleset` flow.
+
 ### Scenery vs creatures
 
 Two different services put things on a scene, and they are not interchangeable:

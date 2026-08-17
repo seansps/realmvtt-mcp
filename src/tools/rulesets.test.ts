@@ -49,5 +49,30 @@ describe("describeRuleset", () => {
   it("tolerates a ruleset with no records or settings", () => {
     const summary = describeRuleset({ _id: "r2", name: "Bare" });
     expect(summary).toMatchObject({ recordTypes: [], globalScripts: [], settingsKeys: [] });
+    expect(summary).toMatchObject({ hasOnCampaignLoad: false });
+    expect(JSON.stringify(summary)).not.toContain("campaignPanel");
+  });
+
+  it("surfaces the Campaign Values hook and panel without carrying the layout", () => {
+    const summary = describeRuleset({
+      _id: "r3",
+      name: "Destiny System",
+      settings: {
+        otherSettings: {
+          onCampaignLoad: "api.setCampaignVariable('doom', 13);",
+          campaignPanel: {
+            name: "Destiny Points",
+            icon: "IconSparkle",
+            gmOnly: false,
+            layout: "…6kb of layout HTML…",
+          },
+        },
+      },
+    });
+    expect(summary).toMatchObject({
+      hasOnCampaignLoad: true,
+      campaignPanel: { name: "Destiny Points", gmOnly: false },
+    });
+    expect(JSON.stringify(summary)).not.toContain("6kb of layout");
   });
 });
