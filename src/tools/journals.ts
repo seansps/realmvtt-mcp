@@ -151,6 +151,36 @@ export function journalRecordLinkHtml(link: JournalLinkInput): string {
   return `<record-link recordlink="${escapeAttr(JSON.stringify(payload))}"></record-link>`;
 }
 
+/** Colors the client's `.trait-tag--*` CSS knows; anything else falls back to gray. */
+export const JOURNAL_TAG_VARIANTS = ["gray", "orange", "blue", "purple", "red", "green"] as const;
+export type JournalTagVariant = (typeof JOURNAL_TAG_VARIANTS)[number];
+
+export interface JournalTagInput {
+  label: string;
+  variant?: JournalTagVariant;
+  /** Optional CSS color that overrides the variant's fill (e.g. `#c45500`). */
+  color?: string;
+}
+
+/**
+ * The `<trait-tag>` chip markup a journal page stores for a stat-block style
+ * label (UNCOMMON / MECHANICAL / TRAP). The label is both an attribute and the
+ * element's text so renderers without the extension still show the word. The
+ * client restyles it and uppercases it in CSS — pass the label in its natural
+ * case.
+ */
+export function journalTagHtml(tag: JournalTagInput): string {
+  const label = tag.label.trim();
+  if (!label) throw new Error("A tag needs a label.");
+  const variant = JOURNAL_TAG_VARIANTS.includes(tag.variant as JournalTagVariant)
+    ? tag.variant
+    : "gray";
+  const color = tag.color?.trim();
+  const attrs = [`label="${escapeAttr(label)}"`, `variant="${variant}"`];
+  if (color) attrs.push(`color="${escapeAttr(color)}"`);
+  return `<trait-tag ${attrs.join(" ")}>${escapeAttr(label)}</trait-tag>`;
+}
+
 /** Resolve a link target given either its id or its name. */
 async function resolveLinkTarget(
   client: RealmClient,
@@ -293,7 +323,10 @@ export function registerJournalTools(server: McpServer): void {
         "(`<h1>`, `<p>`, `<ul><li>`, `<table>` …) — not markdown. `indent` controls left-nav " +
         "nesting: 0 = top level, 1 = subsection. `pageNumber` is 1-based.\n\n" +
         "To embed an image, upload it with `realm_upload_image` (which returns ready-to-paste " +
-        "`<img>` HTML) or build the markup for an existing one with `realm_journal_image_html`.",
+        "`<img>` HTML) or build the markup for an existing one with `realm_journal_image_html`.\n\n" +
+        "Inline label chips (UNCOMMON / TRAP style, as in a stat block) are `<trait-tag>` " +
+        "elements — build them with `realm_journal_tag_html`. Links to campaign content are " +
+        "`<record-link>` — build with `realm_journal_record_link_html`.",
       inputSchema: {
         id: z.string().optional().describe("Page id to update. Omit to create."),
         page: z
@@ -334,6 +367,32 @@ export function registerJournalTools(server: McpServer): void {
         return text(`Deleted journal page ${args.id}.`);
       });
     }),
+  );
+
+  server.registerTool(
+    "realm_journal_tag_html",
+    {
+      title: "Build journal HTML for a tag chip",
+      description:
+        "Produce the `<trait-tag>` markup for a small colored label chip inline in journal " +
+        "text — the UNCOMMON / MECHANICAL / TRAP blocks under a stat-block heading. Paste the " +
+        "result into a page's `content` via `realm_write_journal_page`; put several in one " +
+        "`<p>` separated by spaces to make a row. The client uppercases the label, so pass it " +
+        "in natural case. No lookup is involved, so you may also write the markup by hand: " +
+        '`<trait-tag label="Rare" variant="blue">Rare</trait-tag>`.',
+      inputSchema: {
+        label: z.string().describe("Chip text, e.g. `Uncommon`."),
+        variant: z
+          .enum(JOURNAL_TAG_VARIANTS)
+          .optional()
+          .describe("Fill color. Defaults to `gray`."),
+        color: z
+          .string()
+          .optional()
+          .describe("Custom CSS color overriding the variant fill, e.g. `#c45500`."),
+      },
+    },
+    safe(async (args) => text(journalTagHtml(args))),
   );
 
   server.registerTool(

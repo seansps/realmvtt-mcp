@@ -119,6 +119,11 @@ carries the whole link as JSON in the attribute; build it with
 send the table to a map from inside the prose — clicking it asks the GM to view or
 activate that scene.
 
+**Label chips are a custom tag too.** `<trait-tag label="Uncommon" variant="orange">Uncommon</trait-tag>`
+renders the small colored UNCOMMON / TRAP blocks seen under a stat-block heading.
+Variants: gray (default), orange, blue, purple, red, green; `color="#hex"` overrides.
+`realm_journal_tag_html` builds one; several in a `<p>` make a row.
+
 **Rulesets are big.** `realm_get_ruleset` writes to a file rather than returning
 megabytes of tab HTML and roll-handler JavaScript inline. Reads are unminified, so
 edit-and-upload round trips preserve the source.

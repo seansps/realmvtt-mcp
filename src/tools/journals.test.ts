@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { JOURNAL_LINK_TYPES, journalRecordLinkHtml } from "./journals.js";
+import { JOURNAL_LINK_TYPES, journalRecordLinkHtml, journalTagHtml } from "./journals.js";
 
 /**
  * Pull the JSON back out the way the app does: read the `recordlink` attribute,
@@ -297,5 +297,26 @@ describe("journalRecordLinkHtml — matches links stored by the app", () => {
       }),
     );
     expect(payload.value.token).toEqual({ imageUrl: "/images/d.webp", scaleX: 1, scaleY: 1 });
+  });
+});
+
+describe("journalTagHtml", () => {
+  it("writes label as attribute and text, with variant", () => {
+    expect(journalTagHtml({ label: "Uncommon", variant: "orange" })).toBe(
+      '<trait-tag label="Uncommon" variant="orange">Uncommon</trait-tag>',
+    );
+  });
+
+  it("defaults unknown variants to gray and includes a color override", () => {
+    expect(journalTagHtml({ label: "Trap", variant: "bogus" as never, color: "#ff0000" })).toBe(
+      '<trait-tag label="Trap" variant="gray" color="#ff0000">Trap</trait-tag>',
+    );
+  });
+
+  it("escapes the label and rejects blanks", () => {
+    expect(journalTagHtml({ label: 'A & "B"' })).toBe(
+      '<trait-tag label="A &amp; &quot;B&quot;" variant="gray">A &amp; &quot;B&quot;</trait-tag>',
+    );
+    expect(() => journalTagHtml({ label: "  " })).toThrow();
   });
 });
