@@ -181,6 +181,52 @@ export function journalTagHtml(tag: JournalTagInput): string {
   return `<trait-tag ${attrs.join(" ")}>${escapeAttr(label)}</trait-tag>`;
 }
 
+/** Pathfinder 2e action glyphs; rendered only when the campaign's ruleset is PF2e. */
+export const PF2E_ACTION_ICONS = [
+  "one-action",
+  "two-actions",
+  "three-actions",
+  "free-action",
+  "reaction",
+] as const;
+export type Pf2eActionIcon = (typeof PF2E_ACTION_ICONS)[number];
+
+/**
+ * Narrative dice symbols (Star Wars RPG / Genesys). One stored form for both
+ * games — the client swaps to the Star Wars symbol font by ruleset at render.
+ */
+export const NARRATIVE_DICE_ICONS = [
+  "ability",
+  "proficiency",
+  "boost",
+  "difficulty",
+  "challenge",
+  "setback",
+  "force",
+  "success",
+  "advantage",
+  "triumph",
+  "failure",
+  "threat",
+  "despair",
+  "light",
+  "dark",
+  "forcepoint",
+] as const;
+export type NarrativeDiceIcon = (typeof NARRATIVE_DICE_ICONS)[number];
+
+/** `<span data-icon-type="…">` — what the client's PathfinderIconExtension stores. */
+export function pf2eActionIconHtml(icon: Pf2eActionIcon): string {
+  if (!PF2E_ACTION_ICONS.includes(icon)) throw new Error(`Unknown PF2e action icon: ${icon}`);
+  return `<span data-icon-type="${icon}"></span>`;
+}
+
+/** `<span data-dice-type="…">` — what the client's NarrativeDiceExtension stores. */
+export function narrativeDiceIconHtml(icon: NarrativeDiceIcon): string {
+  if (!NARRATIVE_DICE_ICONS.includes(icon)) throw new Error(`Unknown narrative dice icon: ${icon}`);
+  return `<span data-dice-type="${icon}"></span>`;
+}
+
 /** Resolve a link target given either its id or its name. */
 async function resolveLinkTarget(
   client: RealmClient,
@@ -326,7 +372,8 @@ export function registerJournalTools(server: McpServer): void {
         "`<img>` HTML) or build the markup for an existing one with `realm_journal_image_html`.\n\n" +
         "Inline label chips (UNCOMMON / TRAP style, as in a stat block) are `<trait-tag>` " +
         "elements — build them with `realm_journal_tag_html`. Links to campaign content are " +
-        "`<record-link>` — build with `realm_journal_record_link_html`.",
+        "`<record-link>` — build with `realm_journal_record_link_html`. Pathfinder 2e action " +
+        "icons and Star Wars / Genesys dice symbols come from `realm_journal_icon_html`.",
       inputSchema: {
         id: z.string().optional().describe("Page id to update. Omit to create."),
         page: z
@@ -393,6 +440,39 @@ export function registerJournalTools(server: McpServer): void {
       },
     },
     safe(async (args) => text(journalTagHtml(args))),
+  );
+
+  server.registerTool(
+    "realm_journal_icon_html",
+    {
+      title: "Build journal HTML for a game-system glyph",
+      description:
+        "Produce the inline markup for a system-specific symbol in journal text:\n\n" +
+        "- `pf2e` — Pathfinder 2e action icons (`one-action`, `two-actions`, `three-actions`, " +
+        "`free-action`, `reaction`). Stored as `<span data-icon-type=\"one-action\"></span>`. " +
+        "Only renders when the campaign's ruleset is Pathfinder 2e.\n" +
+        "- `narrative` — Star Wars RPG / Genesys narrative dice and result symbols (`ability`, " +
+        "`proficiency`, `boost`, `difficulty`, `challenge`, `setback`, `force`, `success`, " +
+        "`advantage`, `triumph`, `failure`, `threat`, `despair`, `light`, `dark`, `forcepoint`). " +
+        "Stored as `<span data-dice-type=\"ability\"></span>` for both games; the Star Wars " +
+        "font is chosen by ruleset at render. Only renders when the ruleset uses narrative dice.\n\n" +
+        "The markup is fixed, so you may write it by hand once you know the form; `count` " +
+        "repeats the glyph (e.g. a pool of two ability dice). Paste into a page's `content` " +
+        "via `realm_write_journal_page`, inline with the surrounding text, e.g. " +
+        "`<p>Strike <span data-icon-type=\"one-action\"></span> — make a melee attack.</p>`.",
+      inputSchema: {
+        system: z.enum(["pf2e", "narrative"]).describe("Which glyph set."),
+        icon: z.string().describe("Glyph name from the list for that system."),
+        count: z.number().int().min(1).max(20).optional().describe("Repeat the glyph n times."),
+      },
+    },
+    safe(async (args) => {
+      const one =
+        args.system === "pf2e"
+          ? pf2eActionIconHtml(args.icon as Pf2eActionIcon)
+          : narrativeDiceIconHtml(args.icon as NarrativeDiceIcon);
+      return text(one.repeat(args.count ?? 1));
+    }),
   );
 
   server.registerTool(

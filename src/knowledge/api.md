@@ -124,6 +124,15 @@ renders the small colored UNCOMMON / TRAP blocks seen under a stat-block heading
 Variants: gray (default), orange, blue, purple, red, green; `color="#hex"` overrides.
 `realm_journal_tag_html` builds one; several in a `<p>` make a row.
 
+**System glyphs are empty spans keyed by a data attribute.** Pathfinder 2e action
+icons: `<span data-icon-type="one-action"></span>` (`one-action`, `two-actions`,
+`three-actions`, `free-action`, `reaction`) — PF2e rulesets only. Star Wars RPG /
+Genesys dice symbols: `<span data-dice-type="ability"></span>` (`ability`, `proficiency`,
+`boost`, `difficulty`, `challenge`, `setback`, `force`, `success`, `advantage`, `triumph`,
+`failure`, `threat`, `despair`, `light`, `dark`, `forcepoint`) — narrative-dice rulesets
+only, same markup for both games. `realm_journal_icon_html` builds them. Typing
+`[ONE-ACTION]` or `[AB]` in the app does the same; the MCP writes the stored form.
+
 **Rulesets are big.** `realm_get_ruleset` writes to a file rather than returning
 megabytes of tab HTML and roll-handler JavaScript inline. Reads are unminified, so
 edit-and-upload round trips preserve the source.

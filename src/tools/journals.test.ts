@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { JOURNAL_LINK_TYPES, journalRecordLinkHtml, journalTagHtml } from "./journals.js";
+import {
+  JOURNAL_LINK_TYPES,
+  journalRecordLinkHtml,
+  journalTagHtml,
+  narrativeDiceIconHtml,
+  pf2eActionIconHtml,
+} from "./journals.js";
 
 /**
  * Pull the JSON back out the way the app does: read the `recordlink` attribute,
@@ -318,5 +324,17 @@ describe("journalTagHtml", () => {
       '<trait-tag label="A &amp; &quot;B&quot;" variant="gray">A &amp; &quot;B&quot;</trait-tag>',
     );
     expect(() => journalTagHtml({ label: "  " })).toThrow();
+  });
+});
+
+describe("system glyph html", () => {
+  it("matches the client extensions' stored forms", () => {
+    expect(pf2eActionIconHtml("two-actions")).toBe('<span data-icon-type="two-actions"></span>');
+    expect(narrativeDiceIconHtml("triumph")).toBe('<span data-dice-type="triumph"></span>');
+  });
+
+  it("rejects unknown glyphs", () => {
+    expect(() => pf2eActionIconHtml("ability" as never)).toThrow();
+    expect(() => narrativeDiceIconHtml("one-action" as never)).toThrow();
   });
 });
