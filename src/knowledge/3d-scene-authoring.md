@@ -470,6 +470,25 @@ link on an upper story is computed from the geometry underneath.
 Journal links are addressed by their `index` in `realm_list_markers`, not by id
 (their `id` is the journal's, and repeats when a journal is placed twice).
 
+A **region** (`realm_add_region`) is a GM-only trigger area: when a character
+token enters it, it can float text above the token, auto-pause the game (once,
+until reset), and scale movement cost while inside (`moveSpeedFactor: 0.5` =
+half speed / difficult terrain). Players never see regions.
+
+```jsonc
+// realm_add_region — a rect covering cells (10,8)..(15,13) on the ground floor
+{ "sceneId": "…", "name": "Ambush", "x": 10, "y": 8, "w": 6, "h": 6,
+  "text": "You feel watched…", "autoPause": true, "moveSpeedFactor": 0.5 }
+```
+
+Pass `points` instead of the rect for an irregular polygon. On a 3D scene, `z`
+is the region's BOTTOM elevation in cubes and `height` (default 3) how far up it
+reaches — so a region on the second story gets that story's floor z, exactly
+like a prop placed there. Edit with `realm_update_region` (by `id` from
+`realm_list_markers`; `resetAutoPause: true` re-arms a fired auto-pause), remove
+with `realm_delete_marker` (`kind: "regions"`). Like teleporters, only add
+regions when asked — they change how a map plays.
+
 ## 13. Checklist before placing
 
 - [ ] Every `assetId` exists — verify with `realm_search_3d_assets` first. An

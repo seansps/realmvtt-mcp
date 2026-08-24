@@ -46,6 +46,32 @@ export interface JournalLink extends Json {
   alwaysShowName?: boolean;
 }
 
+/**
+ * A GM-only trigger region: a polygon on the layer that can auto-pause the game
+ * on first character entry, float text over an entering character token, and
+ * scale movement cost while inside. Players never see regions. In 3D, `z` is
+ * the bottom elevation in cubes and `height` the vertical extent above it.
+ */
+export interface Region extends Json {
+  id: string;
+  name?: string;
+  points: Array<{ x: number; y: number }>;
+  z?: number;
+  height?: number;
+  color?: string;
+  autoPause?: boolean;
+  autoPauseTriggered?: boolean;
+  text?: string;
+  moveSpeedFactor?: number;
+  disabled?: boolean;
+}
+
+/** Read a layer's regions, tolerating a layer that has none yet. */
+export function regionsOn(layer: Json | undefined): Region[] {
+  const raw = layer?.regions;
+  return Array.isArray(raw) ? (raw as Region[]) : [];
+}
+
 /** The layer arrays this module manages. */
 export type MarkerKind = "pins" | "teleporters" | "textBlocks";
 
@@ -207,10 +233,11 @@ export function registerMarkerTools(server: McpServer): void {
   server.registerTool(
     "realm_list_markers",
     {
-      title: "List a scene's pins, teleporters, text and journal links",
+      title: "List a scene's pins, teleporters, regions, text and journal links",
       description:
         "List the markers on a scene: camera PINS (GM location bookmarks), TELEPORTERS (linked " +
-        "pads that move tokens), TEXT BLOCKS (floating labels), and JOURNAL LINKS (note markers " +
+        "pads that move tokens), TEXT BLOCKS (floating labels), REGIONS (GM-only trigger areas), " +
+        "and JOURNAL LINKS (note markers " +
         "that open a journal page). Also reports which pin the camera opens on.\n\n" +
         "Journal links carry an `index` — their position in the layer's array — which is how " +
         "`realm_update_journal_link` and `realm_delete_marker` address them. Their `id` is the " +
@@ -228,6 +255,7 @@ export function registerMarkerTools(server: McpServer): void {
           pins: markersOn(layer, "pins"),
           teleporters: markersOn(layer, "teleporters"),
           textBlocks: markersOn(layer, "textBlocks"),
+          regions: regionsOn(layer),
           journals: journalLinksOn(layer).map((j, index) => ({ index, ...j })),
         });
       });
@@ -371,6 +399,167 @@ export function registerMarkerTools(server: McpServer): void {
           added: teleporter,
           ...(args.linkTo ? {} : { note: "No destination set — link it to another teleporter's id to make it work." }),
         });
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_add_region",
+    {
+      title: "Add a trigger region to a scene",
+      description:
+        "Add a REGION — a GM-only trigger area on the scene. When a character token enters it, " +
+        "it can float text above the token, auto-pause the game (once, until the GM resets it), " +
+        "and scale movement cost while inside (`moveSpeedFactor: 0.5` = half speed / difficult " +
+        "terrain). Players never see regions; the GM sees them while the Region tool is active.\n\n" +
+        "Shape: pass `points` (a polygon in grid coordinates, 3+ vertices) OR a rectangle as " +
+        "`x`/`y`/`w`/`h` (top-left cell plus size in cells). On a 3D scene, `z` is the region's " +
+        "bottom elevation in cubes and `height` how far up it reaches (default 3), so it applies " +
+        "to one floor of a multi-story build.\n\n" +
+        "Only add regions when asked — they change how a map plays.",
+      inputSchema: {
+        sceneId: z.string(),
+        name: z.string().describe("Region name, e.g. `Ambush`, `Swamp`, `Trap Corridor`."),
+        points: z
+          .array(z.object({ x: z.number(), y: z.number() }))
+          .min(3)
+          .optional()
+          .describe("Polygon vertices in grid coordinates. Alternative to x/y/w/h."),
+        x: z.number().optional().describe("Rect: top-left cell x. Alternative to `points`."),
+        y: z.number().optional().describe("Rect: top-left cell y."),
+        w: z.number().optional().describe("Rect: width in cells."),
+        h: z.number().optional().describe("Rect: height in cells."),
+        z: z.number().optional().describe("3D: bottom elevation in cubes. Ignored in 2D."),
+        height: z.number().optional().describe("3D: vertical extent in cubes above z. Default 3."),
+        color: z.string().optional().describe("Hex colour for the overlay and floating text."),
+        text: z
+          .string()
+          .max(256)
+          .optional()
+          .describe("Floats above a character token when it enters the region."),
+        autoPause: z
+          .boolean()
+          .optional()
+          .describe("Pause the game the first time a character enters."),
+        moveSpeedFactor: z
+          .number()
+          .optional()
+          .describe("Multiplies movement speed inside (0.5 = half speed). Default 1."),
+        disabled: z.boolean().optional(),
+        ...campaignArg,
+      },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      return withAuthRecovery(async () => {
+        let points = args.points;
+        if (!points) {
+          if (
+            args.x === undefined ||
+            args.y === undefined ||
+            args.w === undefined ||
+            args.h === undefined
+          ) {
+            return text("Pass `points` (3+ vertices), or a rectangle as `x`, `y`, `w` and `h`.");
+          }
+          points = [
+            { x: args.x, y: args.y },
+            { x: args.x + args.w, y: args.y },
+            { x: args.x + args.w, y: args.y + args.h },
+            { x: args.x, y: args.y + args.h },
+          ];
+        }
+
+        const { scene, layer, layerIndex } = await getLayer(client, args.sceneId);
+        const region: Region = {
+          id: randomUUID(),
+          name: args.name,
+          points,
+          ...(args.z !== undefined ? { z: args.z } : {}),
+          ...(args.height !== undefined ? { height: args.height } : {}),
+          ...(args.color ? { color: args.color } : {}),
+          ...(args.text ? { text: args.text } : {}),
+          ...(args.autoPause ? { autoPause: true } : {}),
+          ...(args.moveSpeedFactor !== undefined
+            ? { moveSpeedFactor: args.moveSpeedFactor }
+            : {}),
+          ...(args.disabled ? { disabled: true } : {}),
+        };
+
+        const regions = [...regionsOn(layer), region];
+        await writeLayer(client, args.sceneId, scene, layerIndex, { regions });
+        return json({ added: region, totalRegions: regions.length });
+      });
+    }),
+  );
+
+  server.registerTool(
+    "realm_update_region",
+    {
+      title: "Edit a trigger region on a scene",
+      description:
+        "Change a REGION — its name, colour, entry text, auto-pause, movement speed factor, " +
+        "shape, elevation band, or disabled state. Address it by `id` from `realm_list_markers`; " +
+        "only the fields you pass are changed. Pass `resetAutoPause: true` to re-arm a region " +
+        "whose one-shot auto-pause already fired.",
+      inputSchema: {
+        sceneId: z.string(),
+        id: z.string().describe("The region's id, from `realm_list_markers`."),
+        name: z.string().optional(),
+        points: z
+          .array(z.object({ x: z.number(), y: z.number() }))
+          .min(3)
+          .optional()
+          .describe("Replacement polygon vertices in grid coordinates."),
+        z: z.number().optional().describe("3D: new bottom elevation in cubes."),
+        height: z.number().optional().describe("3D: new vertical extent in cubes."),
+        color: z.string().optional(),
+        text: z.string().max(256).optional(),
+        autoPause: z.boolean().optional(),
+        resetAutoPause: z
+          .boolean()
+          .optional()
+          .describe("Re-arm the one-shot auto-pause after it has fired."),
+        moveSpeedFactor: z.number().optional(),
+        disabled: z.boolean().optional(),
+        ...campaignArg,
+      },
+    },
+    safe(async (args) => {
+      const client = session.client();
+      return withAuthRecovery(async () => {
+        const { scene, layer, layerIndex } = await getLayer(client, args.sceneId);
+        const regions = regionsOn(layer);
+        const index = regions.findIndex((r) => r.id === args.id);
+        const current = regions[index];
+        if (!current) {
+          return text(
+            `No region with id ${args.id} on this scene. Call \`realm_list_markers\` for ids.`,
+          );
+        }
+
+        const patch: Partial<Region> = {};
+        if (args.name !== undefined) patch.name = args.name;
+        if (args.points !== undefined) patch.points = args.points;
+        if (args.z !== undefined) patch.z = args.z;
+        if (args.height !== undefined) patch.height = args.height;
+        if (args.color !== undefined) patch.color = args.color;
+        if (args.text !== undefined) patch.text = args.text;
+        if (args.autoPause !== undefined) patch.autoPause = args.autoPause;
+        if (args.resetAutoPause) patch.autoPauseTriggered = false;
+        if (args.moveSpeedFactor !== undefined) patch.moveSpeedFactor = args.moveSpeedFactor;
+        if (args.disabled !== undefined) patch.disabled = args.disabled;
+
+        const updated: Region = {
+          ...current,
+          ...patch,
+          id: current.id,
+          points: patch.points ?? current.points,
+        };
+        const next = [...regions];
+        next[index] = updated;
+        await writeLayer(client, args.sceneId, scene, layerIndex, { regions: next });
+        return json({ updated });
       });
     }),
   );
@@ -566,17 +755,20 @@ export function registerMarkerTools(server: McpServer): void {
   server.registerTool(
     "realm_delete_marker",
     {
-      title: "Remove a pin, teleporter, text block or journal link",
+      title: "Remove a pin, teleporter, region, text block or journal link",
       description:
         "Remove a marker from a scene, using the identifiers `realm_list_markers` reports: pins, " +
-        "teleporters and text blocks by `id`; journal links by `index`, since they have no id of " +
-        "their own. Requires confirm: true.",
+        "teleporters, regions and text blocks by `id`; journal links by `index`, since they have " +
+        "no id of their own. Requires confirm: true.",
       inputSchema: {
         sceneId: z.string(),
         kind: z
-          .enum(["pins", "teleporters", "textBlocks", "journals"])
+          .enum(["pins", "teleporters", "textBlocks", "regions", "journals"])
           .describe("Which kind of marker."),
-        id: z.string().optional().describe("The marker's id. For pins, teleporters and text blocks."),
+        id: z
+          .string()
+          .optional()
+          .describe("The marker's id. For pins, teleporters, regions and text blocks."),
         index: z.number().int().optional().describe("The link's array position. For journals."),
         ...confirmArg,
         ...campaignArg,
@@ -610,7 +802,8 @@ export function registerMarkerTools(server: McpServer): void {
 
         if (!args.id) return text(`Pass the marker's \`id\` to remove a ${args.kind} marker.`);
 
-        const before = markersOn(layer, args.kind);
+        const before =
+          args.kind === "regions" ? regionsOn(layer) : markersOn(layer, args.kind);
         const after = before.filter((m) => m.id !== args.id);
 
         if (after.length === before.length) {

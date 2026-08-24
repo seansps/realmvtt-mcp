@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { centerOfObjects, journalLinksOn, markersOn, pageList, resolvePage } from "./markers.js";
+import {
+  centerOfObjects,
+  journalLinksOn,
+  markersOn,
+  pageList,
+  regionsOn,
+  resolvePage,
+} from "./markers.js";
 
 describe("centerOfObjects", () => {
   it("finds the middle of a build so the pin frames it", () => {
@@ -50,6 +57,33 @@ describe("markersOn", () => {
     expect(markersOn({}, "pins")).toEqual([]);
     expect(markersOn(undefined, "teleporters")).toEqual([]);
     expect(markersOn({ textBlocks: "not-an-array" }, "textBlocks")).toEqual([]);
+  });
+});
+
+describe("regionsOn", () => {
+  it("reads a layer's regions", () => {
+    const layer = {
+      regions: [
+        {
+          id: "r1",
+          name: "Swamp",
+          points: [
+            { x: 0, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 4 },
+          ],
+          moveSpeedFactor: 0.5,
+        },
+      ],
+    };
+    expect(regionsOn(layer)).toHaveLength(1);
+    expect(regionsOn(layer)[0]?.moveSpeedFactor).toBe(0.5);
+  });
+
+  it("treats a layer with no regions as empty rather than throwing", () => {
+    expect(regionsOn({})).toEqual([]);
+    expect(regionsOn(undefined)).toEqual([]);
+    expect(regionsOn({ regions: "not-an-array" })).toEqual([]);
   });
 });
 
