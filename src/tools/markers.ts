@@ -48,7 +48,7 @@ export interface JournalLink extends Json {
 
 /**
  * A GM-only trigger region: a polygon on the layer that can auto-pause the game
- * on first character entry, float text over an entering character token, and
+ * on first party-token entry (PC or friendly NPC), float text over the entering token, and
  * scale movement cost while inside. Players never see regions. In 3D, `z` is
  * the bottom elevation in cubes and `height` the vertical extent above it.
  */
@@ -408,7 +408,7 @@ export function registerMarkerTools(server: McpServer): void {
     {
       title: "Add a trigger region to a scene",
       description:
-        "Add a REGION — a GM-only trigger area on the scene. When a character token enters it, " +
+        "Add a REGION — a GM-only trigger area on the scene. When a party token (PC or friendly NPC) enters it, " +
         "it can float text above the token, auto-pause the game (once, until the GM resets it), " +
         "and scale movement cost while inside (`moveSpeedFactor: 0.5` = half speed / difficult " +
         "terrain). Players never see regions; the GM sees them while the Region tool is active.\n\n" +
@@ -436,11 +436,11 @@ export function registerMarkerTools(server: McpServer): void {
           .string()
           .max(256)
           .optional()
-          .describe("Floats above a character token when it enters the region."),
+          .describe("Floats above a party token (PC or friendly NPC) when it enters the region."),
         autoPause: z
           .boolean()
           .optional()
-          .describe("Pause the game the first time a character enters."),
+          .describe("Pause the game the first time a party token enters."),
         moveSpeedFactor: z
           .number()
           .optional()

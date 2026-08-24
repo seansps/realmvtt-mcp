@@ -470,8 +470,8 @@ link on an upper story is computed from the geometry underneath.
 Journal links are addressed by their `index` in `realm_list_markers`, not by id
 (their `id` is the journal's, and repeats when a journal is placed twice).
 
-A **region** (`realm_add_region`) is a GM-only trigger area: when a character
-token enters it, it can float text above the token, auto-pause the game (once,
+A **region** (`realm_add_region`) is a GM-only trigger area: when a party token
+(PC or friendly NPC) enters it, it can float text above the token, auto-pause the game (once,
 until reset), and scale movement cost while inside (`moveSpeedFactor: 0.5` =
 half speed / difficult terrain). Players never see regions.
 
