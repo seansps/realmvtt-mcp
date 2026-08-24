@@ -1,6 +1,6 @@
 {
   "name": "realmvtt-mcp",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Bring your own AI agent to Realm VTT — an MCP server for campaign records, effects, rulesets, and 3D scene building.",
   "type": "module",
   "license": "MIT",
