@@ -9,8 +9,7 @@ campaign into folders and construct 3D scenes — by asking.
 
 </div>
 
-> [!IMPORTANT]
-> **This package is in maintenance mode.** Realm VTT MCP 2.0 is hosted at
+> ⚠️ **This package is in maintenance mode.** Realm VTT MCP 2.0 is hosted at
 > **[mcp.realmvtt.com](https://mcp.realmvtt.com)**. Add it as a connector in
 > Claude, with nothing to install. It has every tool here plus live play and
 > headless GM tools. This package keeps working but only receives critical fixes.
