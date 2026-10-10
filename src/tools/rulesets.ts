@@ -336,7 +336,7 @@ export function registerRulesetTools(server: McpServer): void {
       // locally and then upload through our own authenticated client — same result,
       // and the token never leaves this process.
       const out = join(tmpdir(), `realmvtt-ruleset-${process.pid}-${counter()}.json`);
-      const argv = [join(compiler, "src", "cli.js"), dir, "--output", out];
+      const argv = [join(compiler, "src", "cli.js"), "rulesets", dir, "--output", out];
       const { code, stderr } = await run(process.execPath, argv, compiler);
 
       if (code !== 0 || !existsSync(out)) {
