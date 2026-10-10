@@ -1,5 +1,6 @@
 /** Sign-in, identity and campaign-selection tools. */
 import { z } from "zod";
+import { MAINTENANCE_NOTICE } from "../maintenance.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Json, RealmClient } from "../api/client.js";
 import { runLogin } from "../auth/login-server.js";
@@ -77,7 +78,7 @@ export function registerAuthTools(server: McpServer): void {
       return text(
         `${result.message}${who ? "" : ""}\n\n` +
           `Next: call \`realm_list_campaigns\` to see ${who ? "their" : "the user's"} campaigns, ` +
-          `then \`realm_use_campaign\` to pick the one to work in.`,
+          `then \`realm_use_campaign\` to pick the one to work in.\n\n${MAINTENANCE_NOTICE}`,
       );
     }),
   );
@@ -96,9 +97,9 @@ export function registerAuthTools(server: McpServer): void {
       const { token, reason } = authStore.current();
       if (!token) {
         return text(
-          reason === "expired"
+          (reason === "expired"
             ? "The stored Realm VTT session has expired. Call `realm_login` to sign in again."
-            : "Not signed in to Realm VTT. Call `realm_login` to connect.",
+            : "Not signed in to Realm VTT. Call `realm_login` to connect.") + `\n\n${MAINTENANCE_NOTICE}`,
         );
       }
 
@@ -112,6 +113,7 @@ export function registerAuthTools(server: McpServer): void {
           ? { id: state.campaignId, name: state.campaignName, inviteCode: state.inviteCode }
           : null,
         tokenExpiresInDays: days,
+        notice: MAINTENANCE_NOTICE,
         warning:
           reason === "expiring"
             ? "This token expires within a day — run `realm_login` again soon."

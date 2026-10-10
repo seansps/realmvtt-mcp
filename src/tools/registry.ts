@@ -5,6 +5,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ApiError, AuthRequiredError, explainApiError } from "../api/errors.js";
+import { takeNoticeOnce } from "../maintenance.js";
 
 /** The MCP SDK's tool-result shape. The index signature is part of its contract
  *  (handlers may attach extra top-level fields), so it has to be declared here too. */
@@ -43,13 +44,20 @@ export function toToolError(err: unknown): ToolResult {
   return failure(err instanceof Error ? err.message : String(err));
 }
 
+/** Append the maintenance notice to the first tool result of this process. */
+function withNotice(result: ToolResult): ToolResult {
+  const notice = takeNoticeOnce();
+  if (!notice) return result;
+  return { ...result, content: [...result.content, { type: "text", text: `Note: ${notice}` }] };
+}
+
 /** Wrap a handler so no tool call ever escapes as an unhandled rejection. */
 export function safe<A>(fn: (args: A) => Promise<ToolResult>): (args: A) => Promise<ToolResult> {
   return async (args: A) => {
     try {
-      return await fn(args);
+      return withNotice(await fn(args));
     } catch (err) {
-      return toToolError(err);
+      return withNotice(toToolError(err));
     }
   };
 }

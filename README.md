@@ -9,9 +9,36 @@ campaign into folders and construct 3D scenes — by asking.
 
 </div>
 
+> [!IMPORTANT]
+> **This package is in maintenance mode.** Realm VTT MCP 2.0 is hosted at
+> **[mcp.realmvtt.com](https://mcp.realmvtt.com)**. Add it as a connector in
+> Claude, with nothing to install. It has every tool here plus live play and
+> headless GM tools. This package keeps working but only receives critical fixes.
+
 ---
 
-## Install
+## Moving to MCP 2.0
+
+1. Remove this server from your assistant. In Claude Code:
+   `claude mcp remove realmvtt`.
+2. Add the hosted one:
+   - **Claude (web, desktop, mobile):** Settings → Connectors → Add custom
+     connector → `https://mcp.realmvtt.com/mcp`, then sign in to Realm VTT and
+     choose Allow.
+   - **Claude Code:** `claude mcp add --transport http realmvtt https://mcp.realmvtt.com/mcp`,
+     then run `/mcp` and sign in when your browser opens.
+3. What works differently in 2.0:
+   - Sign in through the connector instead of `realm_login`.
+   - Upload files from a web link, or from your computer with a one-time upload link.
+   - Compile rulesets on your computer with the public
+     [ruleset compiler](https://github.com/seansps/ruleset-compiler), then upload the result.
+
+**Support policy for 1.x:** critical fixes and security issues only. New tools
+and features go to 2.0.
+
+---
+
+## Install (1.x, legacy)
 
 ```bash
 claude mcp add realmvtt -- npx -y realmvtt-mcp

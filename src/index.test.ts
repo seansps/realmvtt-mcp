@@ -104,6 +104,11 @@ describe.skipIf(!built)("the published binary", () => {
    * two drift silently: 0.9.1 published while the handshake still said 0.9.0.
    * Nothing breaks loudly, which is exactly why it goes unnoticed.
    */
+  it("opens its instructions with the maintenance notice pointing to MCP 2.0", async () => {
+    const result = await handshake(builtEntry);
+    expect(String(result.instructions)).toMatch(/^realmvtt-mcp is in maintenance mode\. .*https:\/\/mcp\.realmvtt\.com/);
+  });
+
   it("advertises the version it was published as", async () => {
     const pkg = JSON.parse(
       await readFile(resolve(here, "..", "package.json"), "utf8"),

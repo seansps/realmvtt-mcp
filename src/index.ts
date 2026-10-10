@@ -24,15 +24,17 @@ import { registerTokenTools } from "./tools/tokens.js";
 import { registerFolderTools } from "./tools/folders.js";
 import { registerReferenceTools } from "./tools/references.js";
 import { registerAuditTools } from "./tools/audit.js";
+import { MAINTENANCE_NOTICE } from "./maintenance.js";
 
 export const SERVER_NAME = "realmvtt";
-export const SERVER_VERSION = "1.5.1";
+export const SERVER_VERSION = "1.6.0";
 
 export function createServer(): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
       instructions:
+        `${MAINTENANCE_NOTICE}\n\n` +
         "Tools for a Realm VTT campaign: records (NPCs, items, spells, tables, characters), " +
         "effects, journals, encounters, rulesets, folders, and 3D scene building.\n\n" +
         "Start with `realm_whoami`. If it reports no session, call `realm_login`. " +
@@ -62,6 +64,7 @@ async function main(): Promise<void> {
   const server = createServer();
   await server.connect(new StdioServerTransport());
   console.error(`${SERVER_NAME} MCP server ready`);
+  console.error(MAINTENANCE_NOTICE);
 }
 
 /**
